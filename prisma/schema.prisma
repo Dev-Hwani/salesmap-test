@@ -1,0 +1,108 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  A
+  B
+  C
+}
+
+enum FieldType {
+  text
+  number
+  date
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         UserRole
+  managerId    Int?
+  manager      User?    @relation("UserManager", fields: [managerId], references: [id])
+  subordinates User[]   @relation("UserManager")
+  deals        Deal[]   @relation("DealOwner")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Pipeline {
+  id        Int      @id @default(autoincrement())
+  name      String
+  position  Int      @default(0)
+  stages    Stage[]
+  deals     Deal[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Stage {
+  id             Int      @id @default(autoincrement())
+  pipelineId     Int
+  name           String
+  probability    Int?
+  description    String?
+  stagnationDays Int?
+  position       Int      @default(0)
+  pipeline       Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Restrict)
+  deals          Deal[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([pipelineId])
+}
+
+model Deal {
+  id              Int              @id @default(autoincrement())
+  name            String
+  expectedRevenue Int?
+  closeDate       DateTime?
+  pipelineId      Int
+  stageId         Int
+  ownerId         Int
+  pipeline        Pipeline         @relation(fields: [pipelineId], references: [id], onDelete: Restrict)
+  stage           Stage            @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  owner           User             @relation("DealOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  fieldValues     DealFieldValue[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([pipelineId])
+  @@index([stageId])
+  @@index([ownerId])
+}
+
+model CustomField {
+  id                Int              @id @default(autoincrement())
+  label             String
+  type              FieldType
+  visibleInCreate   Boolean          @default(true)
+  visibleInPipeline Boolean          @default(false)
+  position          Int              @default(0)
+  values            DealFieldValue[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model DealFieldValue {
+  id          Int         @id @default(autoincrement())
+  dealId      Int
+  fieldId     Int
+  valueText   String?
+  valueNumber Float?
+  valueDate   DateTime?
+  deal        Deal        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  field       CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@unique([dealId, fieldId])
+  @@index([fieldId])
+}

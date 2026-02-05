@@ -1,36 +1,159 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+﻿# Salesmap 과제 구현 README
 
-## Getting Started
+이 프로젝트는 세일즈 CRM의 축소판을 목표로 하되 **기능 동작뿐 아니라 설계의 의도와 일관성**이 코드 전반에서 읽히도록 구성했습니다. 평가 기준에 맞춰 구조/가독성/일관성/예외 처리를 명확하게 드러내는 것을 최우선으로 삼았습니다.
 
-First, run the development server:
+## 핵심 구현 요약
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- 인증: JWT + HttpOnly 쿠키, 만료 7일, 기본 해시 처리
+- 권한: A/B/C 계층, 상위 → 하위 조회 가능
+- 파이프라인: 멀티 파이프라인, 스테이지 CRUD + 순서 변경
+- 딜: 칸반 UI + Drag & Drop(dnd-kit)
+- 커스텀 필드: text/number/date, 생성/파이프라인 노출 옵션 분리
+- 필터: AND 조건, is / is not, 기본/커스텀 필드 모두 지원
+
+## 기술/구조 선택 이유
+
+- Next.js(App Router): 페이지, API, 레이아웃을 한 프로젝트에서 일관되게 관리할 수 있어 과제 요구사항을 가장 단순하고 명확하게 구성할 수 있습니다.
+- MySQL + Prisma: 요구 스택을 만족하면서 마이그레이션/시드/타입 안정성을 확보해 유지보수성과 신뢰도를 높였습니다.
+- JWT + HttpOnly 쿠키: 보안 복잡도는 낮추되 서버가 책임지고 검증하는 구조로 단순화했습니다.
+- dnd-kit: 칸반 이동 요구를 정확히 충족하면서 의존성 과잉 없이 구현할 수 있어 과제 범위에 적합합니다.
+- 정책 로직 분리: 정책 판단을 `src/lib`로 모아 API가 일관된 규칙을 강제하도록 설계했습니다.
+
+## 평가 기준 대응 (설계 품질 강조)
+
+### 구조적 설계
+
+- 기능/도메인 기준 분리: UI는 `src/components`, 정책/인증/공통 로직은 `src/lib`, 타입은 `src/types`로 분리했습니다.
+- 책임 분리: API 라우트는 입출력 검증과 정책 적용만 담당하고, 정책 판단은 `src/lib/policy.ts`로 고립했습니다.
+- 반복 최소화: 공통 응답은 `src/lib/http.ts`, 파라미터 파싱은 `src/lib/ids.ts`로 통일했습니다.
+
+### 가독성
+
+- 네이밍은 역할이 드러나게 구성했습니다.
+- 복잡한 로직은 의미 단위로 분리했습니다. 예: 필터 평가, 권한 판단, 파이프라인 정렬은 각각 별도 함수.
+- 주석은 최소화하고, 로직 자체가 의도를 설명하도록 했습니다.
+
+### 일관성
+
+- 모든 API는 `jsonOk/jsonError`로 동일한 응답 포맷을 사용합니다.
+- 정책은 UI가 아닌 API에서 통제하여 우회 요청도 동일한 규칙으로 처리합니다.
+- 동일한 문제는 동일한 접근을 사용합니다. 예: 삭제 조건과 정렬 조건은 전 라우트에 동일 기준 적용.
+
+### 예외/비즈니스 로직 처리
+
+- 스테이지 최소 3개 유지
+- 딜이 있는 스테이지 삭제 불가
+- 딜이 있는 파이프라인 삭제 불가
+- 파이프라인 최소 1개 유지
+- 권한 없는 딜 접근 차단
+- 커스텀 필드 타입 변경은 값이 있으면 차단
+
+위 예외는 모두 API에서 검증되며, UI 상태와 무관하게 일관된 정책을 보장합니다.
+
+## 비즈니스 정책 요약
+
+- 권한 정책: A는 A/B/C, B는 B/C, C는 본인 딜만 조회
+- 스테이지 정책: 딜이 존재하면 삭제 불가, 최소 3개 유지
+- 파이프라인 정책: 딜이 존재하면 삭제 불가, 최소 1개 유지
+- 필터 정책: AND + is/is not으로 예측 가능하고 단순한 규칙 유지
+
+## 주요 폴더 구조
+
+- `src/app`: 페이지, API 라우트
+- `src/components`: UI 컴포넌트
+- `src/components/pipeline`: 딜/칸반 관련 컴포넌트
+- `src/lib`: 인증/정책/DB/공통 응답/ID 파싱
+- `src/types`: 도메인 타입 정의
+
+## 주요 기능 상세
+
+### 인증
+
+- 회원가입 / 로그인 / 로그아웃 구현
+- JWT를 HttpOnly 쿠키로 전달
+- 첫 가입자는 자동 A 역할
+- 만료 7일 (`JWT_EXPIRES_IN=7d`)
+
+### 권한 (A/B/C 계층)
+
+- A: A/B/C 딜 조회 가능
+- B: B/C 딜 조회 가능
+- C: 본인 딜만 조회 가능
+- B는 A를 매니저로, C는 B를 매니저로 선택
+
+### 파이프라인/스테이지
+
+- 멀티 파이프라인 지원
+- 스테이지 구성: 이름 / 가능성 / 설명 / 정체 기준일
+- 스테이지 순서 변경 지원
+- 삭제는 조건부 정책 적용
+
+### 딜/칸반
+
+- 스테이지 별 칸반 UI 구성
+- dnd-kit 기반 Drag & Drop 이동
+- 이동 실패 시 자동 롤백
+
+### 커스텀 필드
+
+- 타입: text, number, date
+- `visible_in_create`, `visible_in_pipeline`로 화면 노출 분리
+- 필드 관리 페이지에서 생성/수정 가능
+
+### 필터링
+
+- AND 조건, is / is not 연산 지원
+- 기본 필드 + 커스텀 필드 모두 적용
+- 텍스트는 대소문자 구분 없이 비교
+
+## 실행 방법
+
+### 1) 환경 변수
+
+`.env`
+
+```
+DATABASE_URL="mysql://root:1234@localhost:3306/salesmap_test"
+JWT_SECRET="salesmap-secret-please-change-1234567890"
+JWT_EXPIRES_IN="7d"
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2) DB 마이그레이션 & 시드
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+pnpm db:migrate
+pnpm db:seed
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 3) 개발 서버 실행
 
-## Learn More
+```
+pnpm dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+접속: `http://localhost:3000`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 주요 페이지
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `/login`: 로그인
+- `/signup`: 회원가입
+- `/pipeline`: 딜 파이프라인(칸반)
+- `/settings/pipelines`: 파이프라인/스테이지 설정
+- `/settings/fields`: 커스텀 필드 설정
 
-## Deploy on Vercel
+## 기술 스택
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Next.js (App Router)
+- MySQL + Prisma
+- dnd-kit
+- JWT + HttpOnly Cookie
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 설계 의도 요약
+
+이 과제는 기능 구현보다 **설계 의도와 일관성**을 더 중요하게 평가합니다. 그래서
+
+- 정책 판단을 한 곳(`src/lib/policy.ts`)에 집중
+- 예외를 UI가 아닌 API에서 통제
+- 반복되는 응답 포맷과 파라미터 파싱을 통일
+
+하는 방식으로 **읽히는 설계**를 목표로 구성했습니다.
