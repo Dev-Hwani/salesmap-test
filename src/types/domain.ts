@@ -27,19 +27,40 @@ export type Stage = {
   dealCount?: number;
 };
 
-export type CustomFieldType = "text" | "number" | "date" | "datetime";
+export type CustomFieldType =
+  | "text"
+  | "number"
+  | "date"
+  | "datetime"
+  | "single_select"
+  | "multi_select"
+  | "boolean"
+  | "user"
+  | "users"
+  | "file"
+  | "calculation";
+
+export type CustomFieldOption = {
+  id: number;
+  fieldId: number;
+  label: string;
+  position: number;
+  deletedAt?: string | null;
+};
 
 export type CustomField = {
   id: number;
   objectType: ObjectType;
   label: string;
   type: CustomFieldType;
+  formula?: string | null;
   required: boolean;
   masked: boolean;
   visibleInCreate: boolean;
   visibleInPipeline: boolean;
   position: number;
   deletedAt?: string | null;
+  options?: CustomFieldOption[];
 };
 
 export type FieldValue = {
@@ -48,7 +69,34 @@ export type FieldValue = {
   valueNumber: number | null;
   valueDate: string | null;
   valueDateTime?: string | null;
+  valueBoolean?: boolean | null;
+  valueUserId?: number | null;
+  valueOptionId?: number | null;
+  valueUser?: UserSummary | null;
+  valueOption?: CustomFieldOption | null;
   field?: CustomField;
+};
+
+export type FieldOptionValue = {
+  fieldId: number;
+  optionId: number;
+  option?: CustomFieldOption;
+};
+
+export type FieldUserValue = {
+  fieldId: number;
+  userId: number;
+  user?: UserSummary;
+};
+
+export type FieldFile = {
+  id: number;
+  fieldId: number;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  createdAt?: string;
+  objectType?: ObjectType;
 };
 
 export type Deal = {
@@ -61,6 +109,9 @@ export type Deal = {
   ownerId: number;
   owner?: UserSummary;
   fieldValues: FieldValue[];
+  optionValues?: FieldOptionValue[];
+  userValues?: FieldUserValue[];
+  files?: FieldFile[];
 };
 
 export type Lead = {
@@ -73,6 +124,9 @@ export type Lead = {
   ownerId: number;
   owner?: UserSummary;
   fieldValues: FieldValue[];
+  optionValues?: FieldOptionValue[];
+  userValues?: FieldUserValue[];
+  files?: FieldFile[];
 };
 
 export type Contact = {
@@ -84,6 +138,9 @@ export type Contact = {
   ownerId: number;
   owner?: UserSummary;
   fieldValues: FieldValue[];
+  optionValues?: FieldOptionValue[];
+  userValues?: FieldUserValue[];
+  files?: FieldFile[];
 };
 
 export type Company = {
@@ -94,4 +151,7 @@ export type Company = {
   ownerId: number;
   owner?: UserSummary;
   fieldValues: FieldValue[];
+  optionValues?: FieldOptionValue[];
+  userValues?: FieldUserValue[];
+  files?: FieldFile[];
 };

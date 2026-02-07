@@ -10,7 +10,7 @@ const updateSchema = z.object({
   name: z.string().min(1).optional(),
   stageId: z.number().int().optional(),
   ownerId: z.number().int().optional(),
-  expectedRevenue: z.number().int().nullable().optional(),
+  expectedRevenue: z.number().nullable().optional(),
   closeDate: z.string().nullable().optional(),
 });
 
@@ -87,6 +87,11 @@ export async function PATCH(
           valueNumber: true,
           valueDate: true,
           valueDateTime: true,
+          valueBoolean: true,
+          valueUserId: true,
+          valueOptionId: true,
+          valueUser: { select: { id: true, name: true, role: true } },
+          valueOption: { select: { id: true, label: true } },
         },
       },
     },

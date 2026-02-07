@@ -2,8 +2,11 @@
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
-import { canAssignOwner, getVisibleOwnerIds } from "@/lib/policy";
-import { isEmptyFieldValue, parseCustomFieldValue } from "@/lib/customFieldValues";
+import { canAssignOwner, getAssignableUsers, getVisibleOwnerIds } from "@/lib/policy";
+import { parseRequestWithFiles } from "@/lib/request";
+import { parseCustomFieldInputs } from "@/lib/customFieldInput";
+import { evaluateFormula } from "@/lib/calculation";
+import { saveUploadedFile } from "@/lib/fileStorage";
 import { z } from "zod";
 
 const leadSchema = z.object({
@@ -17,7 +20,13 @@ const leadSchema = z.object({
     .array(
       z.object({
         fieldId: z.number().int(),
-        value: z.union([z.string(), z.number(), z.null()]),
+        value: z.union([
+          z.string(),
+          z.number(),
+          z.boolean(),
+          z.null(),
+          z.array(z.number()),
+        ]),
       })
     )
     .optional(),
@@ -43,6 +52,35 @@ export async function GET() {
           valueNumber: true,
           valueDate: true,
           valueDateTime: true,
+          valueBoolean: true,
+          valueUserId: true,
+          valueOptionId: true,
+          valueUser: { select: { id: true, name: true, role: true } },
+          valueOption: { select: { id: true, label: true } },
+        },
+      },
+      optionValues: {
+        select: {
+          fieldId: true,
+          optionId: true,
+          option: { select: { id: true, label: true } },
+        },
+      },
+      userValues: {
+        select: {
+          fieldId: true,
+          userId: true,
+          user: { select: { id: true, name: true, role: true } },
+        },
+      },
+      files: {
+        select: {
+          id: true,
+          fieldId: true,
+          originalName: true,
+          mimeType: true,
+          size: true,
+          createdAt: true,
         },
       },
     },
@@ -55,9 +93,12 @@ export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
 
+  const { body, filesByFieldId } = await parseRequestWithFiles<z.infer<typeof leadSchema>>(
+    request
+  );
+
   const visibleOwnerIds = await getVisibleOwnerIds(user);
 
-  const body = await request.json().catch(() => null);
   const parsed = leadSchema.safeParse(body);
   if (!parsed.success) {
     return jsonError("리드 정보를 확인해주세요.");
@@ -84,41 +125,135 @@ export async function POST(request: NextRequest) {
     return jsonError("해당 담당자에게 리드를 할당할 수 없습니다.");
   }
 
+  const inputs = fieldValues ?? [];
+  const fieldIds = inputs.map((value) => value.fieldId);
+  const fields = fieldIds.length
+    ? await prisma.customField.findMany({
+        where: { id: { in: fieldIds }, objectType: "LEAD", deletedAt: null },
+      })
+    : [];
+
+  if (fields.length !== fieldIds.length) {
+    return jsonError("커스텀 필드 정보가 올바르지 않습니다.");
+  }
+
+  const optionRows = fieldIds.length
+    ? await prisma.customFieldOption.findMany({
+        where: { fieldId: { in: fieldIds }, deletedAt: null },
+        select: { id: true, fieldId: true },
+      })
+    : [];
+  const optionMap = new Map<number, Set<number>>();
+  optionRows.forEach((row) => {
+    const set = optionMap.get(row.fieldId) ?? new Set();
+    set.add(row.id);
+    optionMap.set(row.fieldId, set);
+  });
+
+  const assignableUsers = await getAssignableUsers(user);
+  const allowedUserIds = new Set(assignableUsers.map((u) => u.id));
+
+  const parsedFields = parseCustomFieldInputs({
+    fields,
+    inputs,
+    optionMap,
+    allowedUserIds,
+  });
+  if (!parsedFields.ok) {
+    return jsonError(parsedFields.error);
+  }
+
+  const valueRows = parsedFields.data.valueRows;
+  const optionValues = parsedFields.data.multiOptionValues;
+  const userValues = parsedFields.data.multiUserValues;
+  const hasValueMap = parsedFields.data.hasValueMap;
+
   const requiredFields = await prisma.customField.findMany({
     where: { objectType: "LEAD", deletedAt: null, required: true },
-    select: { id: true },
   });
-  const missingRequired = requiredFields.filter(
-    (field) =>
-      !fieldValues?.some(
-        (value) => value.fieldId === field.id && !isEmptyFieldValue(value.value)
-      )
-  );
+
+  const fileFieldIds = Array.from(filesByFieldId.keys());
+  const fileFields = fileFieldIds.length
+    ? await prisma.customField.findMany({
+        where: { id: { in: fileFieldIds }, objectType: "LEAD", deletedAt: null },
+      })
+    : [];
+
+  if (fileFields.length !== fileFieldIds.length) {
+    return jsonError("파일 필드 정보가 올바르지 않습니다.");
+  }
+  if (fileFields.some((field) => field.type !== "file")) {
+    return jsonError("파일 필드 정보가 올바르지 않습니다.");
+  }
+
+  const numberValueMap: Record<number, number | null> = {};
+  const valueMap = new Map<number, Record<string, unknown>>();
+  valueRows.forEach((row) => {
+    const fieldId = row.fieldId as number;
+    valueMap.set(fieldId, row);
+  });
+  fields.forEach((field) => {
+    if (field.type !== "number") return;
+    const row = valueMap.get(field.id);
+    numberValueMap[field.id] = typeof row?.valueNumber === "number" ? (row.valueNumber as number) : null;
+  });
+
+  const calculationFields = await prisma.customField.findMany({
+    where: { objectType: "LEAD", deletedAt: null, type: "calculation" },
+  });
+
+  const warnings: string[] = [];
+  for (const field of calculationFields) {
+    const result = field.formula
+      ? evaluateFormula(field.formula, numberValueMap)
+      : { value: null, warnings: [] };
+    if (result.warnings.length > 0) {
+      warnings.push(...result.warnings.map((warning) => `${field.label}: ${warning}`));
+    }
+    valueMap.set(field.id, { fieldId: field.id, valueNumber: result.value });
+    hasValueMap.set(field.id, result.value !== null);
+  }
+
+  const missingRequired = requiredFields.filter((field) => {
+    if (field.type === "file") {
+      return (filesByFieldId.get(field.id) ?? []).length === 0;
+    }
+    if (field.type === "multi_select" || field.type === "users") {
+      return !(hasValueMap.get(field.id) ?? false);
+    }
+    if (field.type === "calculation") {
+      return !(hasValueMap.get(field.id) ?? false);
+    }
+    return !(hasValueMap.get(field.id) ?? false);
+  });
   if (missingRequired.length > 0) {
     return jsonError("필수 커스텀 필드를 입력해주세요.");
   }
 
-  const fieldValueCreates = [];
-  if (fieldValues && fieldValues.length > 0) {
-    const fieldIds = fieldValues.map((value) => value.fieldId);
-    const fields = await prisma.customField.findMany({
-      where: { id: { in: fieldIds }, objectType: "LEAD", deletedAt: null },
-    });
+  const optionValueCreates = Array.from(optionValues.entries()).flatMap(
+    ([fieldId, optionIds]) => optionIds.map((optionId) => ({ fieldId, optionId }))
+  );
+  const userValueCreates = Array.from(userValues.entries()).flatMap(
+    ([fieldId, userIds]) => userIds.map((userId) => ({ fieldId, userId }))
+  );
 
-    if (fields.length !== fieldIds.length) {
-      return jsonError("커스텀 필드 정보가 올바르지 않습니다.");
-    }
+  const fileCreates = [] as Array<{
+    fieldId: number;
+    originalName: string;
+    storagePath: string;
+    mimeType: string;
+    size: number;
+  }>;
 
-    for (const field of fields) {
-      const input = fieldValues.find((value) => value.fieldId === field.id);
-      if (!input) continue;
-
-      const parsedValue = parseCustomFieldValue(field, input.value);
-      if (!parsedValue.ok) {
-        return jsonError(parsedValue.error);
+  try {
+    for (const [fieldId, files] of filesByFieldId.entries()) {
+      for (const file of files) {
+        const stored = await saveUploadedFile(file, "LEAD", fieldId);
+        fileCreates.push({ fieldId, ...stored });
       }
-      fieldValueCreates.push(parsedValue.data);
     }
+  } catch (error) {
+    return jsonError((error as Error).message ?? "파일 업로드에 실패했습니다.");
   }
 
   const lead = await prisma.lead.create({
@@ -129,7 +264,10 @@ export async function POST(request: NextRequest) {
       companyId: companyId ?? null,
       status,
       ownerId,
-      fieldValues: { create: fieldValueCreates },
+      fieldValues: { create: Array.from(valueMap.values()) },
+      optionValues: { create: optionValueCreates },
+      userValues: { create: userValueCreates },
+      files: { create: fileCreates },
     },
     include: {
       owner: { select: { id: true, name: true, role: true } },
@@ -140,10 +278,39 @@ export async function POST(request: NextRequest) {
           valueNumber: true,
           valueDate: true,
           valueDateTime: true,
+          valueBoolean: true,
+          valueUserId: true,
+          valueOptionId: true,
+          valueUser: { select: { id: true, name: true, role: true } },
+          valueOption: { select: { id: true, label: true } },
+        },
+      },
+      optionValues: {
+        select: {
+          fieldId: true,
+          optionId: true,
+          option: { select: { id: true, label: true } },
+        },
+      },
+      userValues: {
+        select: {
+          fieldId: true,
+          userId: true,
+          user: { select: { id: true, name: true, role: true } },
+        },
+      },
+      files: {
+        select: {
+          id: true,
+          fieldId: true,
+          originalName: true,
+          mimeType: true,
+          size: true,
+          createdAt: true,
         },
       },
     },
   });
 
-  return jsonOk({ lead }, 201);
+  return jsonOk({ lead, warnings }, 201);
 }

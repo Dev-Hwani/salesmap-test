@@ -1,4 +1,4 @@
-import type { CustomFieldType, ObjectType } from "@/types/domain";
+﻿import type { CustomFieldType, ObjectType } from "@/types/domain";
 
 export type SystemField = {
   key: string;

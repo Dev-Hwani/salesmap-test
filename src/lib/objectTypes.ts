@@ -1,4 +1,4 @@
-import type { ObjectType } from "@/types/domain";
+﻿import type { ObjectType } from "@/types/domain";
 
 export const OBJECT_TYPES: ObjectType[] = ["DEAL", "LEAD", "CONTACT", "COMPANY"];
 

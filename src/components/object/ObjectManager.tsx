@@ -1,7 +1,16 @@
-﻿"use client";
+﻿
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Company, CustomField, ObjectType, UserSummary } from "@/types/domain";
+import type {
+  Company,
+  CustomField,
+  FieldFile,
+  FieldOptionValue,
+  FieldUserValue,
+  ObjectType,
+  UserSummary,
+} from "@/types/domain";
 import { getSystemFields, type SystemField } from "@/lib/systemFields";
 import { OBJECT_TYPE_LABELS } from "@/lib/objectTypes";
 
@@ -27,7 +36,15 @@ type ObjectItem = {
     valueNumber: number | null;
     valueDate: string | null;
     valueDateTime?: string | null;
+    valueBoolean?: boolean | null;
+    valueUserId?: number | null;
+    valueOptionId?: number | null;
+    valueUser?: UserSummary | null;
+    valueOption?: { id: number; label: string } | null;
   }>;
+  optionValues?: FieldOptionValue[];
+  userValues?: FieldUserValue[];
+  files?: FieldFile[];
   [key: string]: unknown;
 };
 
@@ -52,10 +69,15 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState<ObjectItem | null>(null);
   const [baseValues, setBaseValues] = useState<Record<string, string>>({});
   const [customValues, setCustomValues] = useState<Record<number, string>>({});
+  const [customBoolValues, setCustomBoolValues] = useState<Record<number, boolean>>({});
+  const [customMultiValues, setCustomMultiValues] = useState<Record<number, number[]>>({});
+  const [customUserValues, setCustomUserValues] = useState<Record<number, number[]>>({});
+  const [customFiles, setCustomFiles] = useState<Record<number, File[]>>({});
 
   const systemFields = useMemo(() => getSystemFields(objectType), [objectType]);
   const createSystemFields = useMemo(
@@ -81,6 +103,12 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
     companies.forEach((company) => map.set(company.id, company));
     return map;
   }, [companies]);
+
+  const userMap = useMemo(() => {
+    const map = new Map<number, UserSummary>();
+    assignableUsers.forEach((user) => map.set(user.id, user));
+    return map;
+  }, [assignableUsers]);
 
   const refreshAll = async () => {
     setLoading(true);
@@ -119,7 +147,6 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
   useEffect(() => {
     refreshAll().catch(() => setLoading(false));
   }, [objectType, apiPath]);
-
   useEffect(() => {
     if (!showForm || editingItem) return;
     const defaults: Record<string, string> = {};
@@ -136,6 +163,11 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
     });
     setBaseValues(defaults);
     setCustomValues({});
+    setCustomBoolValues({});
+    setCustomMultiValues({});
+    setCustomUserValues({});
+    setCustomFiles({});
+    setWarning(null);
   }, [showForm, editingItem, createSystemFields, assignableUsers]);
 
   useEffect(() => {
@@ -150,6 +182,7 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
     setEditingItem(null);
     setShowForm(true);
     setError(null);
+    setWarning(null);
   };
 
   const openEdit = (item: ObjectItem) => {
@@ -181,24 +214,60 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
     });
 
     const nextCustomValues: Record<number, string> = {};
+    const nextCustomBoolValues: Record<number, boolean> = {};
+    const nextCustomMultiValues: Record<number, number[]> = {};
+    const nextCustomUserValues: Record<number, number[]> = {};
+
     visibleCustomFields.forEach((field) => {
       const match = item.fieldValues.find((value) => value.fieldId === field.id);
-      if (!match) return;
-      if (field.type === "text") nextCustomValues[field.id] = match.valueText ?? "";
-      if (field.type === "number")
-        nextCustomValues[field.id] = match.valueNumber?.toString() ?? "";
-      if (field.type === "date")
-        nextCustomValues[field.id] = match.valueDate ? dateToYMD(match.valueDate) : "";
-      if (field.type === "datetime")
-        nextCustomValues[field.id] = match.valueDateTime
+      if (field.type === "text") {
+        nextCustomValues[field.id] = match?.valueText ?? "";
+      }
+      if (field.type === "number") {
+        nextCustomValues[field.id] = match?.valueNumber?.toString() ?? "";
+      }
+      if (field.type === "date") {
+        nextCustomValues[field.id] = match?.valueDate ? dateToYMD(match.valueDate) : "";
+      }
+      if (field.type === "datetime") {
+        nextCustomValues[field.id] = match?.valueDateTime
           ? dateTimeToLocal(match.valueDateTime)
           : "";
+      }
+      if (field.type === "boolean") {
+        if (match?.valueBoolean !== null && match?.valueBoolean !== undefined) {
+          nextCustomBoolValues[field.id] = match.valueBoolean;
+        }
+      }
+      if (field.type === "single_select") {
+        nextCustomValues[field.id] = match?.valueOptionId ? String(match.valueOptionId) : "";
+      }
+      if (field.type === "user") {
+        nextCustomValues[field.id] = match?.valueUserId ? String(match.valueUserId) : "";
+      }
+      if (field.type === "multi_select") {
+        const values = item.optionValues
+          ?.filter((value) => value.fieldId === field.id)
+          .map((value) => value.optionId) ?? [];
+        nextCustomMultiValues[field.id] = values;
+      }
+      if (field.type === "users") {
+        const values = item.userValues
+          ?.filter((value) => value.fieldId === field.id)
+          .map((value) => value.userId) ?? [];
+        nextCustomUserValues[field.id] = values;
+      }
     });
 
     setBaseValues(defaults);
     setCustomValues(nextCustomValues);
+    setCustomBoolValues(nextCustomBoolValues);
+    setCustomMultiValues(nextCustomMultiValues);
+    setCustomUserValues(nextCustomUserValues);
+    setCustomFiles({});
     setShowForm(true);
     setError(null);
+    setWarning(null);
   };
 
   const closeForm = () => {
@@ -208,6 +277,7 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
 
   const submitForm = async () => {
     setError(null);
+    setWarning(null);
     const payload: Record<string, unknown> = {};
     let hasError = false;
 
@@ -244,19 +314,40 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
 
     if (hasError) return;
 
-    const fieldPayload = visibleCustomFields.map((field) => ({
-      fieldId: field.id,
-      value: customValues[field.id] ?? "",
-    }));
+    const fieldPayload = visibleCustomFields
+      .filter((field) => field.type !== "file" && field.type !== "calculation")
+      .map((field) => {
+        if (field.type === "multi_select") {
+          return { fieldId: field.id, value: customMultiValues[field.id] ?? [] };
+        }
+        if (field.type === "users") {
+          return { fieldId: field.id, value: customUserValues[field.id] ?? [] };
+        }
+        if (field.type === "boolean") {
+          const boolValue = customBoolValues[field.id];
+          return { fieldId: field.id, value: boolValue ?? null };
+        }
+        return { fieldId: field.id, value: customValues[field.id] ?? "" };
+      });
 
     payload.fieldValues = fieldPayload;
 
+    const hasFiles = Object.values(customFiles).some((files) => files.length > 0);
     const response = await fetch(
       editingItem ? `${apiPath}/${editingItem.id}` : apiPath,
       {
         method: editingItem ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        headers: hasFiles ? undefined : { "Content-Type": "application/json" },
+        body: hasFiles
+          ? (() => {
+              const formData = new FormData();
+              formData.append("payload", JSON.stringify(payload));
+              Object.entries(customFiles).forEach(([fieldId, files]) => {
+                files.forEach((file) => formData.append(`file-${fieldId}`, file));
+              });
+              return formData;
+            })()
+          : JSON.stringify(payload),
       }
     );
 
@@ -264,6 +355,11 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
       const data = await response.json().catch(() => null);
       setError(data?.error ?? "요청에 실패했습니다.");
       return;
+    }
+
+    const data = await response.json().catch(() => null);
+    if (data?.warnings?.length) {
+      setWarning(data.warnings.join("\n"));
     }
 
     await refreshAll();
@@ -275,6 +371,18 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
     if (!response.ok) {
       const data = await response.json().catch(() => null);
       setError(data?.error ?? "삭제에 실패했습니다.");
+      return;
+    }
+    await refreshAll();
+  };
+
+  const removeFile = async (file: FieldFile) => {
+    const response = await fetch(`/api/files/${objectType}/${file.id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      setError(data?.error ?? "파일 삭제에 실패했습니다.");
       return;
     }
     await refreshAll();
@@ -299,20 +407,51 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
 
   const renderCustomValue = (item: ObjectItem, field: CustomField) => {
     const match = item.fieldValues.find((value) => value.fieldId === field.id);
-    if (!match) return "";
-    if (field.masked) return "••••";
-    if (field.type === "text") return match.valueText ?? "";
-    if (field.type === "number") return match.valueNumber?.toString() ?? "";
-    if (field.type === "date") return match.valueDate ? dateToYMD(match.valueDate) : "";
+    if (field.masked) return "????";
+    if (field.type === "text") return match?.valueText ?? "";
+    if (field.type === "number") return match?.valueNumber?.toString() ?? "";
+    if (field.type === "date") return match?.valueDate ? dateToYMD(match.valueDate) : "";
     if (field.type === "datetime")
-      return match.valueDateTime ? dateTimeToLocal(match.valueDateTime) : "";
+      return match?.valueDateTime ? dateTimeToLocal(match.valueDateTime) : "";
+    if (field.type === "boolean") {
+      if (match?.valueBoolean === null || match?.valueBoolean === undefined) return "";
+      return match.valueBoolean ? "예" : "아니오";
+    }
+    if (field.type === "single_select") {
+      if (!match?.valueOptionId) return "";
+      return field.options?.find((option) => option.id === match.valueOptionId)?.label ?? "";
+    }
+    if (field.type === "multi_select") {
+      const options = item.optionValues
+        ?.filter((value) => value.fieldId === field.id)
+        .map((value) => value.option?.label ?? "")
+        .filter(Boolean);
+      return options && options.length > 0 ? options.join(", ") : "";
+    }
+    if (field.type === "user") {
+      const user = match?.valueUser ?? (match?.valueUserId ? userMap.get(match.valueUserId) : null);
+      return user?.name ?? "";
+    }
+    if (field.type === "users") {
+      const names = item.userValues
+        ?.filter((value) => value.fieldId === field.id)
+        .map((value) => value.user?.name ?? "")
+        .filter(Boolean);
+      return names && names.length > 0 ? names.join(", ") : "";
+    }
+    if (field.type === "calculation") {
+      return match?.valueNumber?.toString() ?? "";
+    }
+    if (field.type === "file") {
+      const count = item.files?.filter((file) => file.fieldId === field.id).length ?? 0;
+      return count > 0 ? `파일 ${count}개` : "";
+    }
     return "";
   };
 
   if (loading) {
     return <p className="text-sm text-zinc-800">로딩 중...</p>;
   }
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -327,6 +466,9 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
       </div>
 
       {error && !showForm && <p className="text-sm text-red-600">{error}</p>}
+      {warning && !showForm && (
+        <p className="text-sm whitespace-pre-line text-amber-600">{warning}</p>
+      )}
 
       {items.length === 0 ? (
         <p className="text-sm text-zinc-700">등록된 항목이 없습니다.</p>
@@ -374,6 +516,30 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
                         {line.label}: {line.value}
                       </div>
                     ))}
+                  </div>
+                )}
+                {item.files && item.files.length > 0 && (
+                  <div className="mt-3 text-sm">
+                    <p className="font-semibold">파일</p>
+                    <ul className="mt-2 space-y-1 text-xs text-zinc-700">
+                      {item.files.map((file) => (
+                        <li key={file.id} className="flex items-center gap-2">
+                          <a
+                            href={`/api/files/${objectType}/${file.id}`}
+                            className="underline"
+                          >
+                            {file.originalName}
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => removeFile(file)}
+                            className="text-xs text-red-600"
+                          >
+                            삭제
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>
@@ -518,6 +684,7 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
                     {field.label}
                     <input
                       type={field.type === "number" ? "number" : "text"}
+                      step={field.type === "number" ? "any" : undefined}
                       value={baseValues[field.key] ?? ""}
                       onChange={(event) =>
                         setBaseValues((prev) => ({
@@ -536,41 +703,267 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
                 <div className="rounded border border-zinc-200 p-3">
                   <p className="text-sm font-semibold">커스텀 필드</p>
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {visibleCustomFields.map((field) => (
-                      <label key={field.id} className="flex flex-col gap-1 text-sm">
+                    {visibleCustomFields.map((field) => {
+                      const labelNode = (
                         <span className="flex items-center gap-2">
                           {field.label}
                           {field.masked && (
                             <span className="text-xs text-zinc-500">마스킹</span>
                           )}
                         </span>
-                        {field.type === "date" ? (
-                          <input
-                            type="date"
-                            value={customValues[field.id] ?? ""}
-                            onChange={(event) =>
-                              setCustomValues((prev) => ({
-                                ...prev,
-                                [field.id]: event.target.value,
-                              }))
-                            }
-                            required={field.required}
-                            className="rounded border border-zinc-300 px-3 py-2"
-                          />
-                        ) : field.type === "datetime" ? (
-                          <input
-                            type="datetime-local"
-                            value={customValues[field.id] ?? ""}
-                            onChange={(event) =>
-                              setCustomValues((prev) => ({
-                                ...prev,
-                                [field.id]: event.target.value,
-                              }))
-                            }
-                            required={field.required}
-                            className="rounded border border-zinc-300 px-3 py-2"
-                          />
-                        ) : (
+                      );
+
+                      if (field.type === "date") {
+                        return (
+                          <label key={field.id} className="flex flex-col gap-1 text-sm">
+                            {labelNode}
+                            <input
+                              type="date"
+                              value={customValues[field.id] ?? ""}
+                              onChange={(event) =>
+                                setCustomValues((prev) => ({
+                                  ...prev,
+                                  [field.id]: event.target.value,
+                                }))
+                              }
+                              required={field.required}
+                              className="rounded border border-zinc-300 px-3 py-2"
+                            />
+                          </label>
+                        );
+                      }
+
+                      if (field.type === "datetime") {
+                        return (
+                          <label key={field.id} className="flex flex-col gap-1 text-sm">
+                            {labelNode}
+                            <input
+                              type="datetime-local"
+                              value={customValues[field.id] ?? ""}
+                              onChange={(event) =>
+                                setCustomValues((prev) => ({
+                                  ...prev,
+                                  [field.id]: event.target.value,
+                                }))
+                              }
+                              required={field.required}
+                              className="rounded border border-zinc-300 px-3 py-2"
+                            />
+                          </label>
+                        );
+                      }
+
+                      if (field.type === "single_select") {
+                        return (
+                          <label key={field.id} className="flex flex-col gap-1 text-sm">
+                            {labelNode}
+                            <select
+                              value={customValues[field.id] ?? ""}
+                              onChange={(event) =>
+                                setCustomValues((prev) => ({
+                                  ...prev,
+                                  [field.id]: event.target.value,
+                                }))
+                              }
+                              required={field.required}
+                              className="rounded border border-zinc-300 px-3 py-2"
+                            >
+                              <option value="">선택</option>
+                              {field.options?.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        );
+                      }
+
+                      if (field.type === "multi_select") {
+                        const selected = customMultiValues[field.id] ?? [];
+                        return (
+                          <div key={field.id} className="flex flex-col gap-2 text-sm">
+                            {labelNode}
+                            <div className="flex flex-col gap-1 rounded border border-zinc-200 p-2">
+                              {field.options?.map((option) => (
+                                <label key={option.id} className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected.includes(option.id)}
+                                    onChange={() => {
+                                      setCustomMultiValues((prev) => {
+                                        const list = prev[field.id] ?? [];
+                                        const exists = list.includes(option.id);
+                                        const next = exists
+                                          ? list.filter((id) => id !== option.id)
+                                          : [...list, option.id];
+                                        return { ...prev, [field.id]: next };
+                                      });
+                                    }}
+                                  />
+                                  {option.label}
+                                </label>
+                              ))}
+                              {(!field.options || field.options.length === 0) && (
+                                <span className="text-xs text-zinc-500">옵션이 없습니다.</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (field.type === "boolean") {
+                        return (
+                          <label key={field.id} className="flex flex-col gap-1 text-sm">
+                            {labelNode}
+                            <select
+                              value={
+                                customBoolValues[field.id] === undefined
+                                  ? ""
+                                  : customBoolValues[field.id]
+                                    ? "true"
+                                    : "false"
+                              }
+                              onChange={(event) =>
+                                setCustomBoolValues((prev) => ({
+                                  ...prev,
+                                  [field.id]: event.target.value === "true",
+                                }))
+                              }
+                              required={field.required}
+                              className="rounded border border-zinc-300 px-3 py-2"
+                            >
+                              <option value="">선택</option>
+                              <option value="true">예</option>
+                              <option value="false">아니오</option>
+                            </select>
+                          </label>
+                        );
+                      }
+
+                      if (field.type === "user") {
+                        return (
+                          <label key={field.id} className="flex flex-col gap-1 text-sm">
+                            {labelNode}
+                            <select
+                              value={customValues[field.id] ?? ""}
+                              onChange={(event) =>
+                                setCustomValues((prev) => ({
+                                  ...prev,
+                                  [field.id]: event.target.value,
+                                }))
+                              }
+                              required={field.required}
+                              className="rounded border border-zinc-300 px-3 py-2"
+                            >
+                              <option value="">선택</option>
+                              {assignableUsers.map((user) => (
+                                <option key={user.id} value={user.id}>
+                                  {user.name} ({user.role})
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        );
+                      }
+
+                      if (field.type === "users") {
+                        const selected = customUserValues[field.id] ?? [];
+                        return (
+                          <div key={field.id} className="flex flex-col gap-2 text-sm">
+                            {labelNode}
+                            <div className="flex flex-col gap-1 rounded border border-zinc-200 p-2">
+                              {assignableUsers.map((user) => (
+                                <label key={user.id} className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected.includes(user.id)}
+                                    onChange={() => {
+                                      setCustomUserValues((prev) => {
+                                        const list = prev[field.id] ?? [];
+                                        const exists = list.includes(user.id);
+                                        const next = exists
+                                          ? list.filter((id) => id !== user.id)
+                                          : [...list, user.id];
+                                        return { ...prev, [field.id]: next };
+                                      });
+                                    }}
+                                  />
+                                  {user.name} ({user.role})
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (field.type === "file") {
+                        const files = customFiles[field.id] ?? [];
+                        return (
+                          <div key={field.id} className="flex flex-col gap-2 text-sm">
+                            {labelNode}
+                            <input
+                              type="file"
+                              multiple
+                              onChange={(event) => {
+                                const list = event.target.files
+                                  ? Array.from(event.target.files)
+                                  : [];
+                                setCustomFiles((prev) => ({ ...prev, [field.id]: list }));
+                              }}
+                              className="text-sm"
+                            />
+                            {files.length > 0 && (
+                              <ul className="text-xs text-zinc-600">
+                                {files.map((file) => (
+                                  <li key={file.name}>{file.name}</li>
+                                ))}
+                              </ul>
+                            )}
+                            {editingItem && editingItem.files && (
+                              <ul className="text-xs text-zinc-700">
+                                {editingItem.files
+                                  .filter((file) => file.fieldId === field.id)
+                                  .map((file) => (
+                                    <li key={file.id} className="flex items-center gap-2">
+                                      <a
+                                        href={`/api/files/${objectType}/${file.id}`}
+                                        className="underline"
+                                      >
+                                        {file.originalName}
+                                      </a>
+                                      <button
+                                        type="button"
+                                        onClick={() => removeFile(file)}
+                                        className="text-xs text-red-600"
+                                      >
+                                        삭제
+                                      </button>
+                                    </li>
+                                  ))}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      if (field.type === "calculation") {
+                        return (
+                          <label key={field.id} className="flex flex-col gap-1 text-sm">
+                            {labelNode}
+                            <input
+                              type="text"
+                              value="자동 계산"
+                              disabled
+                              className="rounded border border-zinc-200 bg-zinc-100 px-3 py-2 text-zinc-600"
+                            />
+                          </label>
+                        );
+                      }
+
+                      return (
+                        <label key={field.id} className="flex flex-col gap-1 text-sm">
+                          {labelNode}
                           <input
                             type={
                               field.masked && field.type === "text"
@@ -579,6 +972,7 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
                                   ? "number"
                                   : "text"
                             }
+                            step={field.type === "number" ? "any" : undefined}
                             value={customValues[field.id] ?? ""}
                             onChange={(event) =>
                               setCustomValues((prev) => ({
@@ -589,13 +983,16 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
                             required={field.required}
                             className="rounded border border-zinc-300 px-3 py-2"
                           />
-                        )}
-                      </label>
-                    ))}
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
+              {warning && (
+                <p className="text-sm whitespace-pre-line text-amber-600">{warning}</p>
+              )}
               {error && <p className="text-sm text-red-600">{error}</p>}
 
               <button
@@ -612,3 +1009,4 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
     </div>
   );
 }
+

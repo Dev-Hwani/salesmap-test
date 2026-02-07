@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { DndContext, DragEndEvent } from "@dnd-kit/core";
-import type { CustomField, Deal, Pipeline, Stage } from "@/types/domain";
+import type { CustomField, Deal, Pipeline, Stage, UserSummary } from "@/types/domain";
 import { DealCard } from "@/components/pipeline/DealCard";
 import { StageColumn } from "@/components/pipeline/StageColumn";
 import {
@@ -38,18 +38,55 @@ function dateTimeToLocal(value: string | null) {
   return date.toISOString().slice(0, 16);
 }
 
-function getCustomFieldValue(
+function getOptionLabel(field: CustomField, optionId: number | null) {
+  if (!optionId) return "";
+  return field.options?.find((option) => option.id === optionId)?.label ?? "";
+}
+
+function getCustomFieldDisplay(
   deal: Deal,
-  field: CustomField
-): string | number | null {
+  field: CustomField,
+  userMap: Map<number, UserSummary>
+) {
   const match = deal.fieldValues.find((value) => value.fieldId === field.id);
-  if (!match) return null;
-  if (field.type === "text") return match.valueText ?? "";
-  if (field.type === "number") return match.valueNumber ?? null;
-  if (field.type === "date") return match.valueDate ? dateToYMD(match.valueDate) : "";
+
+  if (field.type === "text") return match?.valueText ?? "";
+  if (field.type === "number") return match?.valueNumber ?? null;
+  if (field.type === "date") return match?.valueDate ? dateToYMD(match.valueDate) : "";
   if (field.type === "datetime")
-    return match.valueDateTime ? dateTimeToLocal(match.valueDateTime) : "";
-  return null;
+    return match?.valueDateTime ? dateTimeToLocal(match.valueDateTime) : "";
+  if (field.type === "boolean")
+    return match?.valueBoolean === null || match?.valueBoolean === undefined
+      ? ""
+      : match.valueBoolean
+        ? "예"
+        : "아니오";
+  if (field.type === "single_select")
+    return getOptionLabel(field, match?.valueOptionId ?? null);
+  if (field.type === "multi_select") {
+    const options = deal.optionValues
+      ?.filter((value) => value.fieldId === field.id)
+      .map((value) => value.option?.label ?? "")
+      .filter(Boolean);
+    return options && options.length > 0 ? options.join(", ") : "";
+  }
+  if (field.type === "user") {
+    const user = match?.valueUser ?? (match?.valueUserId ? userMap.get(match.valueUserId) : null);
+    return user?.name ?? "";
+  }
+  if (field.type === "users") {
+    const names = deal.userValues
+      ?.filter((value) => value.fieldId === field.id)
+      .map((value) => value.user?.name ?? "")
+      .filter(Boolean);
+    return names && names.length > 0 ? names.join(", ") : "";
+  }
+  if (field.type === "calculation") return match?.valueNumber ?? null;
+  if (field.type === "file") {
+    const count = deal.files?.filter((file) => file.fieldId === field.id).length ?? 0;
+    return count > 0 ? `파일 ${count}개` : "";
+  }
+  return "";
 }
 
 function matchesFilter(
@@ -63,33 +100,79 @@ function matchesFilter(
     const id = Number(filter.fieldKey.replace("custom-", ""));
     const field = fields.find((item) => item.id === id);
     if (!field) return true;
-    const value = getCustomFieldValue(deal, field);
+
     if (field.type === "text") {
-      const dealValue = normalizeText(String(value ?? ""));
+      const dealValue = normalizeText(String(getCustomFieldValue(deal, field) ?? ""));
       const filterValue = normalizeText(filter.value);
       return filter.operator === "is"
         ? dealValue === filterValue
         : dealValue !== filterValue;
     }
-    if (field.type === "number") {
+
+    if (field.type === "number" || field.type === "calculation") {
       const numeric = Number(filter.value);
       if (Number.isNaN(numeric)) return true;
-      const dealValue = Number(value ?? NaN);
+      const dealValue = Number(getCustomFieldValue(deal, field) ?? NaN);
       return filter.operator === "is"
         ? dealValue === numeric
         : dealValue !== numeric;
     }
+
     if (field.type === "date") {
-      const dealValue = String(value ?? "");
+      const dealValue = String(getCustomFieldValue(deal, field) ?? "");
       return filter.operator === "is"
         ? dealValue === filter.value
         : dealValue !== filter.value;
     }
+
     if (field.type === "datetime") {
-      const dealValue = String(value ?? "");
+      const dealValue = String(getCustomFieldValue(deal, field) ?? "");
       return filter.operator === "is"
         ? dealValue === filter.value
         : dealValue !== filter.value;
+    }
+
+    if (field.type === "boolean") {
+      const match = deal.fieldValues.find((value) => value.fieldId === field.id);
+      if (match?.valueBoolean === null || match?.valueBoolean === undefined) {
+        return filter.operator === "is_not";
+      }
+      const boolValue = match.valueBoolean ? "true" : "false";
+      return filter.operator === "is"
+        ? boolValue === filter.value
+        : boolValue !== filter.value;
+    }
+
+    if (field.type === "single_select") {
+      const match = deal.fieldValues.find((value) => value.fieldId === field.id);
+      const optionId = match?.valueOptionId ? String(match.valueOptionId) : "";
+      return filter.operator === "is"
+        ? optionId === filter.value
+        : optionId !== filter.value;
+    }
+
+    if (field.type === "multi_select") {
+      const optionIds = deal.optionValues
+        ?.filter((value) => value.fieldId === field.id)
+        .map((value) => String(value.optionId))
+        .filter(Boolean) ?? [];
+      const hasValue = optionIds.includes(filter.value);
+      return filter.operator === "is" ? hasValue : !hasValue;
+    }
+
+    if (field.type === "user") {
+      const match = deal.fieldValues.find((value) => value.fieldId === field.id);
+      const userId = match?.valueUserId ? String(match.valueUserId) : "";
+      return filter.operator === "is" ? userId === filter.value : userId !== filter.value;
+    }
+
+    if (field.type === "users") {
+      const userIds = deal.userValues
+        ?.filter((value) => value.fieldId === field.id)
+        .map((value) => String(value.userId))
+        .filter(Boolean) ?? [];
+      const hasValue = userIds.includes(filter.value);
+      return filter.operator === "is" ? hasValue : !hasValue;
     }
   }
 
@@ -121,6 +204,18 @@ function matchesFilter(
   return true;
 }
 
+function getCustomFieldValue(deal: Deal, field: CustomField) {
+  const match = deal.fieldValues.find((value) => value.fieldId === field.id);
+  if (!match) return null;
+  if (field.type === "text") return match.valueText ?? "";
+  if (field.type === "number") return match.valueNumber ?? null;
+  if (field.type === "date") return match.valueDate ? dateToYMD(match.valueDate) : "";
+  if (field.type === "datetime")
+    return match.valueDateTime ? dateTimeToLocal(match.valueDateTime) : "";
+  if (field.type === "calculation") return match.valueNumber ?? null;
+  return null;
+}
+
 export default function PipelinePage() {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [selectedPipelineId, setSelectedPipelineId] = useState<number | null>(
@@ -128,6 +223,7 @@ export default function PipelinePage() {
   );
   const [deals, setDeals] = useState<Deal[]>([]);
   const [fields, setFields] = useState<CustomField[]>([]);
+  const [assignableUsers, setAssignableUsers] = useState<UserSummary[]>([]);
   const [filters, setFilters] = useState<FilterCondition[]>([]);
   const [showDealForm, setShowDealForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -136,16 +232,46 @@ export default function PipelinePage() {
     (pipeline) => pipeline.id === selectedPipelineId
   );
 
+  const userMap = useMemo(() => {
+    const map = new Map<number, UserSummary>();
+    assignableUsers.forEach((user) => map.set(user.id, user));
+    return map;
+  }, [assignableUsers]);
+
   const fieldOptions = useMemo(() => {
     const customOptions: FieldOption[] = fields
-      .filter((field) => !field.masked)
-      .map((field) => ({
-        key: `custom-${field.id}`,
-        label: field.label,
-        type: field.type,
-      }));
+      .filter((field) => !field.masked && field.type !== "file")
+      .map((field) => {
+        const options: FieldOption["options"] = [];
+        if (field.type === "single_select" || field.type === "multi_select") {
+          field.options?.forEach((option) =>
+            options.push({ value: String(option.id), label: option.label })
+          );
+        }
+        if (field.type === "boolean") {
+          options.push(
+            { value: "true", label: "예" },
+            { value: "false", label: "아니오" }
+          );
+        }
+        if (field.type === "user" || field.type === "users") {
+          assignableUsers.forEach((user) => {
+            options.push({
+              value: String(user.id),
+              label: `${user.name} (${user.role})`,
+            });
+          });
+        }
+
+        return {
+          key: `custom-${field.id}`,
+          label: field.label,
+          type: field.type === "calculation" ? "calculation" : field.type,
+          options: options.length > 0 ? options : undefined,
+        };
+      });
     return [...baseFields, ...customOptions];
-  }, [fields]);
+  }, [fields, assignableUsers]);
 
   const visibleFields = useMemo(
     () => fields.filter((field) => field.visibleInPipeline),
@@ -204,8 +330,15 @@ export default function PipelinePage() {
     setDeals(data.deals);
   };
 
+  const refreshUsers = async () => {
+    const response = await fetch("/api/users/assignable");
+    if (!response.ok) return;
+    const data = await response.json();
+    setAssignableUsers(data.users ?? []);
+  };
+
   useEffect(() => {
-    Promise.all([refreshPipelines(), refreshFields()]).finally(() =>
+    Promise.all([refreshPipelines(), refreshFields(), refreshUsers()]).finally(() =>
       setLoading(false)
     );
   }, []);
@@ -313,7 +446,7 @@ export default function PipelinePage() {
                           }
                         : null,
                       ...visibleFields.map((field) => {
-                        const value = getCustomFieldValue(deal, field);
+                        const value = getCustomFieldDisplay(deal, field, userMap);
                         if (value === null || value === "") return null;
                         return {
                           label: field.label,

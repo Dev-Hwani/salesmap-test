@@ -25,6 +25,13 @@ enum FieldType {
   number
   date
   datetime
+  single_select
+  multi_select
+  boolean
+  user
+  users
+  file
+  calculation
 }
 
 enum LeadStatus {
@@ -47,6 +54,14 @@ model User {
   leads        Lead[]   @relation("LeadOwner")
   contacts     Contact[] @relation("ContactOwner")
   companies    Company[] @relation("CompanyOwner")
+  dealFieldValues    DealFieldValue[]
+  leadFieldValues    LeadFieldValue[]
+  contactFieldValues ContactFieldValue[]
+  companyFieldValues CompanyFieldValue[]
+  dealFieldUserValues    DealFieldUserValue[]
+  leadFieldUserValues    LeadFieldUserValue[]
+  contactFieldUserValues ContactFieldUserValue[]
+  companyFieldUserValues CompanyFieldUserValue[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -80,7 +95,7 @@ model Stage {
 model Deal {
   id              Int              @id @default(autoincrement())
   name            String
-  expectedRevenue Int?
+  expectedRevenue Float?
   closeDate       DateTime?
   pipelineId      Int
   stageId         Int
@@ -89,6 +104,9 @@ model Deal {
   stage           Stage            @relation(fields: [stageId], references: [id], onDelete: Restrict)
   owner           User             @relation("DealOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   fieldValues     DealFieldValue[]
+  optionValues    DealFieldOptionValue[]
+  userValues      DealFieldUserValue[]
+  files           DealFieldFile[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
@@ -102,36 +120,120 @@ model CustomField {
   objectType        ObjectType       @default(DEAL)
   label             String
   type              FieldType
+  formula           String?
   required          Boolean          @default(false)
   masked            Boolean          @default(false)
   visibleInCreate   Boolean          @default(true)
   visibleInPipeline Boolean          @default(false)
   position          Int              @default(0)
   deletedAt         DateTime?
+  options           CustomFieldOption[]
   dealValues        DealFieldValue[]
   leadValues        LeadFieldValue[]
   contactValues     ContactFieldValue[]
   companyValues     CompanyFieldValue[]
+  dealOptionValues    DealFieldOptionValue[]
+  leadOptionValues    LeadFieldOptionValue[]
+  contactOptionValues ContactFieldOptionValue[]
+  companyOptionValues CompanyFieldOptionValue[]
+  dealUserValues    DealFieldUserValue[]
+  leadUserValues    LeadFieldUserValue[]
+  contactUserValues ContactFieldUserValue[]
+  companyUserValues CompanyFieldUserValue[]
+  dealFiles    DealFieldFile[]
+  leadFiles    LeadFieldFile[]
+  contactFiles ContactFieldFile[]
+  companyFiles CompanyFieldFile[]
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
   @@index([objectType, deletedAt])
 }
 
+model CustomFieldOption {
+  id        Int         @id @default(autoincrement())
+  fieldId   Int
+  label     String
+  position  Int         @default(0)
+  deletedAt DateTime?
+  field     CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  dealFieldValues    DealFieldValue[]
+  leadFieldValues    LeadFieldValue[]
+  contactFieldValues ContactFieldValue[]
+  companyFieldValues CompanyFieldValue[]
+  dealFieldOptionValues    DealFieldOptionValue[]
+  leadFieldOptionValues    LeadFieldOptionValue[]
+  contactFieldOptionValues ContactFieldOptionValue[]
+  companyFieldOptionValues CompanyFieldOptionValue[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([fieldId, deletedAt])
+}
+
 model DealFieldValue {
-  id          Int         @id @default(autoincrement())
-  dealId      Int
-  fieldId     Int
-  valueText   String?
-  valueNumber Float?
-  valueDate   DateTime?
+  id            Int         @id @default(autoincrement())
+  dealId        Int
+  fieldId       Int
+  valueText     String?
+  valueNumber   Float?
+  valueDate     DateTime?
   valueDateTime DateTime?
-  deal        Deal        @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  field       CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  valueBoolean  Boolean?
+  valueUserId   Int?
+  valueOptionId Int?
+  deal          Deal        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  field         CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  valueUser     User?       @relation(fields: [valueUserId], references: [id], onDelete: SetNull)
+  valueOption   CustomFieldOption? @relation(fields: [valueOptionId], references: [id], onDelete: SetNull)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   @@unique([dealId, fieldId])
+  @@index([fieldId])
+}
+
+model DealFieldOptionValue {
+  id        Int         @id @default(autoincrement())
+  dealId    Int
+  fieldId   Int
+  optionId  Int
+  deal      Deal        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  field     CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  option    CustomFieldOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+
+  @@unique([dealId, fieldId, optionId])
+  @@index([fieldId])
+}
+
+model DealFieldUserValue {
+  id        Int      @id @default(autoincrement())
+  dealId    Int
+  fieldId   Int
+  userId    Int
+  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  field     CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([dealId, fieldId, userId])
+  @@index([fieldId])
+}
+
+model DealFieldFile {
+  id           Int      @id @default(autoincrement())
+  dealId       Int
+  fieldId      Int
+  originalName String
+  storagePath  String
+  mimeType     String
+  size         Int
+  deal         Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  field        CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
   @@index([fieldId])
 }
 
@@ -146,6 +248,9 @@ model Lead {
   company     Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
   owner       User       @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   fieldValues LeadFieldValue[]
+  optionValues LeadFieldOptionValue[]
+  userValues   LeadFieldUserValue[]
+  files        LeadFieldFile[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   deletedAt   DateTime?
@@ -165,6 +270,9 @@ model Contact {
   company     Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
   owner       User       @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   fieldValues ContactFieldValue[]
+  optionValues ContactFieldOptionValue[]
+  userValues   ContactFieldUserValue[]
+  files        ContactFieldFile[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   deletedAt   DateTime?
@@ -184,6 +292,9 @@ model Company {
   contacts    Contact[]
   leads       Lead[]
   fieldValues CompanyFieldValue[]
+  optionValues CompanyFieldOptionValue[]
+  userValues   CompanyFieldUserValue[]
+  files        CompanyFieldFile[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -200,12 +311,61 @@ model LeadFieldValue {
   valueNumber   Float?
   valueDate     DateTime?
   valueDateTime DateTime?
+  valueBoolean  Boolean?
+  valueUserId   Int?
+  valueOptionId Int?
   lead          Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
   field         CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  valueUser     User?       @relation(fields: [valueUserId], references: [id], onDelete: SetNull)
+  valueOption   CustomFieldOption? @relation(fields: [valueOptionId], references: [id], onDelete: SetNull)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
   @@unique([leadId, fieldId])
+  @@index([fieldId])
+}
+
+model LeadFieldOptionValue {
+  id        Int         @id @default(autoincrement())
+  leadId    Int
+  fieldId   Int
+  optionId  Int
+  lead      Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  field     CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  option    CustomFieldOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+
+  @@unique([leadId, fieldId, optionId])
+  @@index([fieldId])
+}
+
+model LeadFieldUserValue {
+  id        Int      @id @default(autoincrement())
+  leadId    Int
+  fieldId   Int
+  userId    Int
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  field     CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([leadId, fieldId, userId])
+  @@index([fieldId])
+}
+
+model LeadFieldFile {
+  id           Int      @id @default(autoincrement())
+  leadId       Int
+  fieldId      Int
+  originalName String
+  storagePath  String
+  mimeType     String
+  size         Int
+  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  field        CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
   @@index([fieldId])
 }
 
@@ -217,12 +377,61 @@ model ContactFieldValue {
   valueNumber   Float?
   valueDate     DateTime?
   valueDateTime DateTime?
+  valueBoolean  Boolean?
+  valueUserId   Int?
+  valueOptionId Int?
   contact       Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
   field         CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  valueUser     User?       @relation(fields: [valueUserId], references: [id], onDelete: SetNull)
+  valueOption   CustomFieldOption? @relation(fields: [valueOptionId], references: [id], onDelete: SetNull)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
   @@unique([contactId, fieldId])
+  @@index([fieldId])
+}
+
+model ContactFieldOptionValue {
+  id        Int         @id @default(autoincrement())
+  contactId Int
+  fieldId   Int
+  optionId  Int
+  contact   Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  field     CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  option    CustomFieldOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+
+  @@unique([contactId, fieldId, optionId])
+  @@index([fieldId])
+}
+
+model ContactFieldUserValue {
+  id        Int      @id @default(autoincrement())
+  contactId Int
+  fieldId   Int
+  userId    Int
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  field     CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([contactId, fieldId, userId])
+  @@index([fieldId])
+}
+
+model ContactFieldFile {
+  id           Int      @id @default(autoincrement())
+  contactId    Int
+  fieldId      Int
+  originalName String
+  storagePath  String
+  mimeType     String
+  size         Int
+  contact      Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  field        CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
   @@index([fieldId])
 }
 
@@ -234,11 +443,60 @@ model CompanyFieldValue {
   valueNumber   Float?
   valueDate     DateTime?
   valueDateTime DateTime?
+  valueBoolean  Boolean?
+  valueUserId   Int?
+  valueOptionId Int?
   company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   field         CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  valueUser     User?       @relation(fields: [valueUserId], references: [id], onDelete: SetNull)
+  valueOption   CustomFieldOption? @relation(fields: [valueOptionId], references: [id], onDelete: SetNull)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
   @@unique([companyId, fieldId])
+  @@index([fieldId])
+}
+
+model CompanyFieldOptionValue {
+  id        Int         @id @default(autoincrement())
+  companyId Int
+  fieldId   Int
+  optionId  Int
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  field     CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  option    CustomFieldOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+
+  @@unique([companyId, fieldId, optionId])
+  @@index([fieldId])
+}
+
+model CompanyFieldUserValue {
+  id        Int      @id @default(autoincrement())
+  companyId Int
+  fieldId   Int
+  userId    Int
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  field     CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, fieldId, userId])
+  @@index([fieldId])
+}
+
+model CompanyFieldFile {
+  id           Int      @id @default(autoincrement())
+  companyId    Int
+  fieldId      Int
+  originalName String
+  storagePath  String
+  mimeType     String
+  size         Int
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  field        CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
   @@index([fieldId])
 }

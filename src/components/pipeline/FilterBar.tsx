@@ -10,10 +10,23 @@ export type FilterCondition = {
   value: string;
 };
 
+export type FieldOptionType =
+  | "text"
+  | "number"
+  | "date"
+  | "datetime"
+  | "single_select"
+  | "multi_select"
+  | "boolean"
+  | "user"
+  | "users"
+  | "calculation";
+
 export type FieldOption = {
   key: string;
   label: string;
-  type: "text" | "number" | "date" | "datetime";
+  type: FieldOptionType;
+  options?: Array<{ value: string; label: string }>;
 };
 
 type FilterBarProps = {
@@ -58,6 +71,98 @@ export function FilterBar({ filters, setFilters, fields }: FilterBarProps) {
     setFilters(filters.filter((filter) => filter.id !== id));
   };
 
+  const renderValueInput = (filter: FilterCondition) => {
+    const field = fieldByKey[filter.fieldKey];
+    if (!field) {
+      return (
+        <input
+          value={filter.value}
+          onChange={(event) =>
+            updateFilter(filter.id, { value: event.target.value })
+          }
+          className="rounded border border-zinc-300 px-2 py-1"
+        />
+      );
+    }
+
+    if (field.type === "date") {
+      return (
+        <input
+          type="date"
+          value={filter.value}
+          onChange={(event) =>
+            updateFilter(filter.id, { value: event.target.value })
+          }
+          className="rounded border border-zinc-300 px-2 py-1"
+        />
+      );
+    }
+
+    if (field.type === "datetime") {
+      return (
+        <input
+          type="datetime-local"
+          value={filter.value}
+          onChange={(event) =>
+            updateFilter(filter.id, { value: event.target.value })
+          }
+          className="rounded border border-zinc-300 px-2 py-1"
+        />
+      );
+    }
+
+    if (field.type === "number" || field.type === "calculation") {
+      return (
+        <input
+          type="number"
+          step="any"
+          value={filter.value}
+          onChange={(event) =>
+            updateFilter(filter.id, { value: event.target.value })
+          }
+          className="rounded border border-zinc-300 px-2 py-1"
+        />
+      );
+    }
+
+    if (
+      field.type === "single_select" ||
+      field.type === "multi_select" ||
+      field.type === "user" ||
+      field.type === "users" ||
+      field.type === "boolean"
+    ) {
+      const options = field.options ?? [];
+      return (
+        <select
+          value={filter.value}
+          onChange={(event) =>
+            updateFilter(filter.id, { value: event.target.value })
+          }
+          className="rounded border border-zinc-300 px-2 py-1"
+        >
+          <option value="">선택</option>
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      );
+    }
+
+    return (
+      <input
+        type="text"
+        value={filter.value}
+        onChange={(event) =>
+          updateFilter(filter.id, { value: event.target.value })
+        }
+        className="rounded border border-zinc-300 px-2 py-1"
+      />
+    );
+  };
+
   return (
     <section className="rounded border border-zinc-200 bg-white p-4">
       <div className="flex items-center justify-between">
@@ -78,7 +183,6 @@ export function FilterBar({ filters, setFilters, fields }: FilterBarProps) {
       {filters.length > 0 && (
         <div className="mt-3 flex flex-col gap-3 text-sm">
           {filters.map((filter) => {
-            const field = fieldByKey[filter.fieldKey];
             return (
               <div
                 key={filter.id}
@@ -109,34 +213,7 @@ export function FilterBar({ filters, setFilters, fields }: FilterBarProps) {
                   <option value="is">is</option>
                   <option value="is_not">is not</option>
                 </select>
-                {field?.type === "date" ? (
-                  <input
-                    type="date"
-                    value={filter.value}
-                    onChange={(event) =>
-                      updateFilter(filter.id, { value: event.target.value })
-                    }
-                    className="rounded border border-zinc-300 px-2 py-1"
-                  />
-                ) : field?.type === "datetime" ? (
-                  <input
-                    type="datetime-local"
-                    value={filter.value}
-                    onChange={(event) =>
-                      updateFilter(filter.id, { value: event.target.value })
-                    }
-                    className="rounded border border-zinc-300 px-2 py-1"
-                  />
-                ) : (
-                  <input
-                    type={field?.type === "number" ? "number" : "text"}
-                    value={filter.value}
-                    onChange={(event) =>
-                      updateFilter(filter.id, { value: event.target.value })
-                    }
-                    className="rounded border border-zinc-300 px-2 py-1"
-                  />
-                )}
+                {renderValueInput(filter)}
                 <button
                   type="button"
                   onClick={() => removeFilter(filter.id)}

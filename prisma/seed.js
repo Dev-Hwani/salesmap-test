@@ -1,4 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
+﻿const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
 
@@ -17,7 +17,7 @@ async function main() {
           {
             name: "제안",
             probability: 30,
-            description: "제안서를 전달하고 협의를 시작한 단계",
+            description: "제안을 전달하고 협의를 시작하는 단계",
             stagnationDays: 14,
             position: 0,
           },
