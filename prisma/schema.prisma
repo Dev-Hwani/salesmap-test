@@ -13,10 +13,25 @@ enum UserRole {
   C
 }
 
+enum ObjectType {
+  DEAL
+  LEAD
+  CONTACT
+  COMPANY
+}
+
 enum FieldType {
   text
   number
   date
+  datetime
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  LOST
 }
 
 model User {
@@ -29,6 +44,9 @@ model User {
   manager      User?    @relation("UserManager", fields: [managerId], references: [id])
   subordinates User[]   @relation("UserManager")
   deals        Deal[]   @relation("DealOwner")
+  leads        Lead[]   @relation("LeadOwner")
+  contacts     Contact[] @relation("ContactOwner")
+  companies    Company[] @relation("CompanyOwner")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -81,14 +99,23 @@ model Deal {
 
 model CustomField {
   id                Int              @id @default(autoincrement())
+  objectType        ObjectType       @default(DEAL)
   label             String
   type              FieldType
+  required          Boolean          @default(false)
+  masked            Boolean          @default(false)
   visibleInCreate   Boolean          @default(true)
   visibleInPipeline Boolean          @default(false)
   position          Int              @default(0)
-  values            DealFieldValue[]
+  deletedAt         DateTime?
+  dealValues        DealFieldValue[]
+  leadValues        LeadFieldValue[]
+  contactValues     ContactFieldValue[]
+  companyValues     CompanyFieldValue[]
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+
+  @@index([objectType, deletedAt])
 }
 
 model DealFieldValue {
@@ -98,11 +125,120 @@ model DealFieldValue {
   valueText   String?
   valueNumber Float?
   valueDate   DateTime?
+  valueDateTime DateTime?
   deal        Deal        @relation(fields: [dealId], references: [id], onDelete: Cascade)
   field       CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
   @@unique([dealId, fieldId])
+  @@index([fieldId])
+}
+
+model Lead {
+  id          Int        @id @default(autoincrement())
+  name        String
+  email       String?
+  phone       String?
+  companyId   Int?
+  status      LeadStatus @default(NEW)
+  ownerId     Int
+  company     Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  owner       User       @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  fieldValues LeadFieldValue[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+
+  @@index([ownerId])
+  @@index([companyId])
+  @@index([deletedAt])
+}
+
+model Contact {
+  id          Int        @id @default(autoincrement())
+  name        String
+  email       String?
+  phone       String?
+  companyId   Int?
+  ownerId     Int
+  company     Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  owner       User       @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  fieldValues ContactFieldValue[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+
+  @@index([ownerId])
+  @@index([companyId])
+  @@index([deletedAt])
+}
+
+model Company {
+  id          Int       @id @default(autoincrement())
+  name        String
+  industry    String?
+  size        String?
+  ownerId     Int
+  owner       User      @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  contacts    Contact[]
+  leads       Lead[]
+  fieldValues CompanyFieldValue[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  @@index([ownerId])
+  @@index([deletedAt])
+}
+
+model LeadFieldValue {
+  id            Int         @id @default(autoincrement())
+  leadId        Int
+  fieldId       Int
+  valueText     String?
+  valueNumber   Float?
+  valueDate     DateTime?
+  valueDateTime DateTime?
+  lead          Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  field         CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([leadId, fieldId])
+  @@index([fieldId])
+}
+
+model ContactFieldValue {
+  id            Int         @id @default(autoincrement())
+  contactId     Int
+  fieldId       Int
+  valueText     String?
+  valueNumber   Float?
+  valueDate     DateTime?
+  valueDateTime DateTime?
+  contact       Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  field         CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([contactId, fieldId])
+  @@index([fieldId])
+}
+
+model CompanyFieldValue {
+  id            Int         @id @default(autoincrement())
+  companyId     Int
+  fieldId       Int
+  valueText     String?
+  valueNumber   Float?
+  valueDate     DateTime?
+  valueDateTime DateTime?
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  field         CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([companyId, fieldId])
   @@index([fieldId])
 }

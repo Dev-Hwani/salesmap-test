@@ -31,6 +31,13 @@ function dateToYMD(value: string | null) {
   return date.toISOString().slice(0, 10);
 }
 
+function dateTimeToLocal(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 16);
+}
+
 function getCustomFieldValue(
   deal: Deal,
   field: CustomField
@@ -40,6 +47,8 @@ function getCustomFieldValue(
   if (field.type === "text") return match.valueText ?? "";
   if (field.type === "number") return match.valueNumber ?? null;
   if (field.type === "date") return match.valueDate ? dateToYMD(match.valueDate) : "";
+  if (field.type === "datetime")
+    return match.valueDateTime ? dateTimeToLocal(match.valueDateTime) : "";
   return null;
 }
 
@@ -71,6 +80,12 @@ function matchesFilter(
         : dealValue !== numeric;
     }
     if (field.type === "date") {
+      const dealValue = String(value ?? "");
+      return filter.operator === "is"
+        ? dealValue === filter.value
+        : dealValue !== filter.value;
+    }
+    if (field.type === "datetime") {
       const dealValue = String(value ?? "");
       return filter.operator === "is"
         ? dealValue === filter.value
@@ -122,11 +137,13 @@ export default function PipelinePage() {
   );
 
   const fieldOptions = useMemo(() => {
-    const customOptions: FieldOption[] = fields.map((field) => ({
-      key: `custom-${field.id}`,
-      label: field.label,
-      type: field.type,
-    }));
+    const customOptions: FieldOption[] = fields
+      .filter((field) => !field.masked)
+      .map((field) => ({
+        key: `custom-${field.id}`,
+        label: field.label,
+        type: field.type,
+      }));
     return [...baseFields, ...customOptions];
   }, [fields]);
 
@@ -174,7 +191,7 @@ export default function PipelinePage() {
   };
 
   const refreshFields = async () => {
-    const response = await fetch("/api/custom-fields");
+    const response = await fetch("/api/custom-fields?objectType=DEAL");
     if (!response.ok) return;
     const data = await response.json();
     setFields(data.fields);
@@ -300,7 +317,7 @@ export default function PipelinePage() {
                         if (value === null || value === "") return null;
                         return {
                           label: field.label,
-                          value: String(value),
+                          value: field.masked ? "••••" : String(value),
                         };
                       }),
                     ].filter(Boolean) as { label: string; value: string }[];

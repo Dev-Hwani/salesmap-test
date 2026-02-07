@@ -1,4 +1,5 @@
 export type UserRole = "A" | "B" | "C";
+export type ObjectType = "DEAL" | "LEAD" | "CONTACT" | "COMPANY";
 
 export type UserSummary = {
   id: number;
@@ -26,22 +27,27 @@ export type Stage = {
   dealCount?: number;
 };
 
-export type CustomFieldType = "text" | "number" | "date";
+export type CustomFieldType = "text" | "number" | "date" | "datetime";
 
 export type CustomField = {
   id: number;
+  objectType: ObjectType;
   label: string;
   type: CustomFieldType;
+  required: boolean;
+  masked: boolean;
   visibleInCreate: boolean;
   visibleInPipeline: boolean;
   position: number;
+  deletedAt?: string | null;
 };
 
-export type DealFieldValue = {
+export type FieldValue = {
   fieldId: number;
   valueText: string | null;
   valueNumber: number | null;
   valueDate: string | null;
+  valueDateTime?: string | null;
   field?: CustomField;
 };
 
@@ -54,5 +60,38 @@ export type Deal = {
   stageId: number;
   ownerId: number;
   owner?: UserSummary;
-  fieldValues: DealFieldValue[];
+  fieldValues: FieldValue[];
+};
+
+export type Lead = {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  companyId: number | null;
+  status: "NEW" | "CONTACTED" | "QUALIFIED" | "LOST";
+  ownerId: number;
+  owner?: UserSummary;
+  fieldValues: FieldValue[];
+};
+
+export type Contact = {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  companyId: number | null;
+  ownerId: number;
+  owner?: UserSummary;
+  fieldValues: FieldValue[];
+};
+
+export type Company = {
+  id: number;
+  name: string;
+  industry: string | null;
+  size: string | null;
+  ownerId: number;
+  owner?: UserSummary;
+  fieldValues: FieldValue[];
 };

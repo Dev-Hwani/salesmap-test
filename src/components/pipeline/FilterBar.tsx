@@ -13,7 +13,7 @@ export type FilterCondition = {
 export type FieldOption = {
   key: string;
   label: string;
-  type: "text" | "number" | "date";
+  type: "text" | "number" | "date" | "datetime";
 };
 
 type FilterBarProps = {
@@ -112,6 +112,15 @@ export function FilterBar({ filters, setFilters, fields }: FilterBarProps) {
                 {field?.type === "date" ? (
                   <input
                     type="date"
+                    value={filter.value}
+                    onChange={(event) =>
+                      updateFilter(filter.id, { value: event.target.value })
+                    }
+                    className="rounded border border-zinc-300 px-2 py-1"
+                  />
+                ) : field?.type === "datetime" ? (
+                  <input
+                    type="datetime-local"
                     value={filter.value}
                     onChange={(event) =>
                       updateFilter(filter.id, { value: event.target.value })

@@ -86,6 +86,7 @@ export async function PATCH(
           valueText: true,
           valueNumber: true,
           valueDate: true,
+          valueDateTime: true,
         },
       },
     },

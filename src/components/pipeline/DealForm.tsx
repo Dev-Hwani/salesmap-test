@@ -185,7 +185,12 @@ export function DealForm({
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {visibleFields.map((field) => (
                   <label key={field.id} className="flex flex-col gap-1 text-sm">
-                    {field.label}
+                    <span className="flex items-center gap-2">
+                      {field.label}
+                      {field.masked && (
+                        <span className="text-xs text-zinc-500">마스킹</span>
+                      )}
+                    </span>
                     {field.type === "date" ? (
                       <input
                         type="date"
@@ -196,11 +201,12 @@ export function DealForm({
                             [String(field.id)]: event.target.value,
                           }))
                         }
+                        required={field.required}
                         className="rounded border border-zinc-300 px-3 py-2"
                       />
-                    ) : (
+                    ) : field.type === "datetime" ? (
                       <input
-                        type={field.type === "number" ? "number" : "text"}
+                        type="datetime-local"
                         value={fieldValues[String(field.id)] ?? ""}
                         onChange={(event) =>
                           setFieldValues((prev) => ({
@@ -208,6 +214,26 @@ export function DealForm({
                             [String(field.id)]: event.target.value,
                           }))
                         }
+                        required={field.required}
+                        className="rounded border border-zinc-300 px-3 py-2"
+                      />
+                    ) : (
+                      <input
+                        type={
+                          field.masked && field.type === "text"
+                            ? "password"
+                            : field.type === "number"
+                              ? "number"
+                              : "text"
+                        }
+                        value={fieldValues[String(field.id)] ?? ""}
+                        onChange={(event) =>
+                          setFieldValues((prev) => ({
+                            ...prev,
+                            [String(field.id)]: event.target.value,
+                          }))
+                        }
+                        required={field.required}
                         className="rounded border border-zinc-300 px-3 py-2"
                       />
                     )}

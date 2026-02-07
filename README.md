@@ -10,7 +10,8 @@
 - 권한: A/B/C 계층, 상위 → 하위 조회 가능
 - 파이프라인: 멀티 파이프라인, 스테이지 CRUD + 순서 변경
 - 딜: 칸반 UI + Drag & Drop(dnd-kit)
-- 커스텀 필드: text/number/date, 생성/파이프라인 노출 옵션 분리
+- 오브젝트: 딜/리드/고객/회사 확장, 최소 CRUD 제공
+- 커스텀 필드: text/number/date/datetime, 필수/마스킹/노출 옵션 지원
 - 필터: AND 조건, is / is not, 기본/커스텀 필드 모두 지원
 
 ## 기술/구조 선택 이유
@@ -58,6 +59,7 @@
 - 스테이지 정책: 딜이 존재하면 삭제 불가, 최소 3개 유지
 - 파이프라인 정책: 딜이 존재하면 삭제 불가, 최소 1개 유지
 - 필터 정책: AND + is/is not으로 예측 가능하고 단순한 규칙 유지
+- 커스텀 필드 삭제: soft delete로 값 보존
 
 ## 정책 적용 위치 (API 매핑)
 
@@ -74,6 +76,7 @@
 - `src/app`: 페이지, API 라우트
 - `src/components`: UI 컴포넌트
 - `src/components/pipeline`: 딜/칸반 관련 컴포넌트
+- `src/components/object`: 리드/고객/회사 관리 컴포넌트
 - `src/lib`: 인증/정책/DB/공통 응답/ID 파싱
 - `src/types`: 도메인 타입 정의
 
@@ -106,11 +109,19 @@
 - dnd-kit 기반 Drag & Drop 이동
 - 이동 실패 시 자동 롤백
 
+### 리드/고객/회사
+
+- 오브젝트별 목록/생성/수정/삭제(soft delete) 제공
+- 담당자 기준 권한 적용
+- 커스텀 필드 입력 및 표시 지원
+
 ### 커스텀 필드
 
-- 타입: text, number, date
+- 타입: text, number, date, datetime
+- 필수/데이터 마스킹/노출 옵션 지원
 - `visible_in_create`, `visible_in_pipeline`로 화면 노출 분리
 - 필드 관리 페이지에서 생성/수정 가능
+- 마스킹 필드는 검색/필터에서 제외
 
 ### 필터링
 
@@ -150,6 +161,9 @@ pnpm dev
 - `/login`: 로그인
 - `/signup`: 회원가입
 - `/pipeline`: 딜 파이프라인
+- `/leads`: 리드
+- `/contacts`: 고객
+- `/companies`: 회사
 - `/settings/pipelines`: 파이프라인/스테이지 설정
 - `/settings/fields`: 커스텀 필드 설정
 
@@ -159,6 +173,7 @@ pnpm dev
 - MySQL + Prisma
 - dnd-kit
 - JWT + HttpOnly Cookie
+- Tailwind CSS
 
 ## 설계 의도 요약
 
@@ -181,6 +196,7 @@ src/
     api/               서버 API 라우트
   components/          공용 UI 컴포넌트
     pipeline/          딜/파이프라인 관련 UI 컴포넌트
+    object/            리드/고객/회사 관리 UI 컴포넌트
   lib/                 인증/정책/DB/공통 유틸
   types/               도메인 타입 정의
 prisma/                스키마, 마이그레이션, 시드

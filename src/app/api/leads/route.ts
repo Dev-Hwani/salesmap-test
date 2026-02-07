@@ -6,13 +6,13 @@ import { canAssignOwner, getVisibleOwnerIds } from "@/lib/policy";
 import { isEmptyFieldValue, parseCustomFieldValue } from "@/lib/customFieldValues";
 import { z } from "zod";
 
-const dealSchema = z.object({
+const leadSchema = z.object({
   name: z.string().min(1),
-  pipelineId: z.number().int(),
-  stageId: z.number().int(),
+  email: z.string().email().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  companyId: z.number().int().optional().nullable(),
+  status: z.enum(["NEW", "CONTACTED", "QUALIFIED", "LOST"]),
   ownerId: z.number().int(),
-  expectedRevenue: z.number().int().nullable().optional(),
-  closeDate: z.string().nullable().optional(),
   fieldValues: z
     .array(
       z.object({
@@ -23,23 +23,14 @@ const dealSchema = z.object({
     .optional(),
 });
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
 
-  const pipelineParam = request.nextUrl.searchParams.get("pipelineId");
-  if (!pipelineParam) {
-    return jsonError("파이프라인 정보가 올바르지 않습니다.");
-  }
-  const pipelineId = Number(pipelineParam);
-  if (Number.isNaN(pipelineId)) {
-    return jsonError("파이프라인 정보가 올바르지 않습니다.");
-  }
-
   const visibleOwnerIds = await getVisibleOwnerIds(user);
-  const deals = await prisma.deal.findMany({
+  const leads = await prisma.lead.findMany({
     where: {
-      pipelineId,
+      deletedAt: null,
       ...(visibleOwnerIds ? { ownerId: { in: visibleOwnerIds } } : {}),
     },
     orderBy: { createdAt: "desc" },
@@ -57,51 +48,44 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  return jsonOk({ deals });
+  return jsonOk({ leads });
 }
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
 
+  const visibleOwnerIds = await getVisibleOwnerIds(user);
+
   const body = await request.json().catch(() => null);
-  const parsed = dealSchema.safeParse(body);
+  const parsed = leadSchema.safeParse(body);
   if (!parsed.success) {
-    return jsonError("딜 정보를 확인해주세요.");
+    return jsonError("리드 정보를 확인해주세요.");
   }
 
-  const {
-    name,
-    pipelineId,
-    stageId,
-    ownerId,
-    expectedRevenue,
-    closeDate,
-    fieldValues,
-  } = parsed.data;
+  const { name, email, phone, companyId, status, ownerId, fieldValues } = parsed.data;
 
-  const closeDateValue =
-    closeDate && closeDate !== "" ? new Date(closeDate) : null;
-  if (closeDateValue && Number.isNaN(closeDateValue.getTime())) {
-    return jsonError("마감일 값이 올바르지 않습니다.");
-  }
-
-  const stage = await prisma.stage.findUnique({
-    where: { id: stageId },
-    select: { pipelineId: true },
-  });
-  if (!stage || stage.pipelineId !== pipelineId) {
-    return jsonError("스테이지 정보가 올바르지 않습니다.");
+  if (companyId) {
+    const company = await prisma.company.findFirst({
+      where: {
+        id: companyId,
+        deletedAt: null,
+        ...(visibleOwnerIds ? { ownerId: { in: visibleOwnerIds } } : {}),
+      },
+      select: { id: true },
+    });
+    if (!company) {
+      return jsonError("회사 정보가 올바르지 않습니다.");
+    }
   }
 
   const ownerAllowed = await canAssignOwner(user, ownerId);
   if (!ownerAllowed) {
-    return jsonError("해당 담당자에게 딜을 할당할 수 없습니다.");
+    return jsonError("해당 담당자에게 리드를 할당할 수 없습니다.");
   }
 
-  const fieldValueCreates = [];
   const requiredFields = await prisma.customField.findMany({
-    where: { objectType: "DEAL", deletedAt: null, required: true },
+    where: { objectType: "LEAD", deletedAt: null, required: true },
     select: { id: true },
   });
   const missingRequired = requiredFields.filter(
@@ -114,10 +98,11 @@ export async function POST(request: NextRequest) {
     return jsonError("필수 커스텀 필드를 입력해주세요.");
   }
 
+  const fieldValueCreates = [];
   if (fieldValues && fieldValues.length > 0) {
     const fieldIds = fieldValues.map((value) => value.fieldId);
     const fields = await prisma.customField.findMany({
-      where: { id: { in: fieldIds }, objectType: "DEAL", deletedAt: null },
+      where: { id: { in: fieldIds }, objectType: "LEAD", deletedAt: null },
     });
 
     if (fields.length !== fieldIds.length) {
@@ -136,17 +121,15 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const deal = await prisma.deal.create({
+  const lead = await prisma.lead.create({
     data: {
       name,
-      pipelineId,
-      stageId,
+      email: email ?? null,
+      phone: phone ?? null,
+      companyId: companyId ?? null,
+      status,
       ownerId,
-      expectedRevenue: expectedRevenue ?? null,
-      closeDate: closeDateValue,
-      fieldValues: {
-        create: fieldValueCreates,
-      },
+      fieldValues: { create: fieldValueCreates },
     },
     include: {
       owner: { select: { id: true, name: true, role: true } },
@@ -162,5 +145,5 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  return jsonOk({ deal }, 201);
+  return jsonOk({ lead }, 201);
 }
