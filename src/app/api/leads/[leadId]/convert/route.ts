@@ -1,9 +1,9 @@
-import { NextRequest } from "next/server";
+﻿import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
 import { parseId } from "@/lib/ids";
-import { getVisibleOwnerIds } from "@/lib/policy";
+import { getVisibleOwnerIds, hasPermission } from "@/lib/policy";
 import { z } from "zod";
 
 const convertSchema = z.object({
@@ -17,6 +17,9 @@ export async function POST(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "write")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { leadId: leadIdParam } = await params;
   const leadId = parseId(leadIdParam);
@@ -56,6 +59,14 @@ export async function POST(
   }
 
   const { pipelineId, stageId } = parsed.data;
+  const pipeline = await prisma.pipeline.findFirst({
+    where: { id: pipelineId, ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}) },
+    select: { id: true },
+  });
+  if (!pipeline) {
+    return jsonError("파이프라인 정보가 올바르지 않습니다.");
+  }
+
   const stage = await prisma.stage.findUnique({
     where: { id: stageId },
     select: { pipelineId: true },

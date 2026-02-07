@@ -4,6 +4,8 @@ import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
 import { parseId } from "@/lib/ids";
 import { extractFormulaFieldIds, validateFormulaSyntax } from "@/lib/calculation";
+import { hasPermission } from "@/lib/policy";
+import { logAudit } from "@/lib/audit";
 import { z } from "zod";
 
 const updateSchema = z.object({
@@ -69,13 +71,19 @@ export async function PATCH(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "manage")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { fieldId: fieldIdParam } = await params;
   const fieldId = parseId(fieldIdParam);
   if (!fieldId) return jsonError("필드 정보가 올바르지 않습니다.");
 
-  const targetField = await prisma.customField.findUnique({
-    where: { id: fieldId },
+  const targetField = await prisma.customField.findFirst({
+    where: {
+      id: fieldId,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
     select: { id: true, objectType: true, deletedAt: true, masked: true, type: true },
   });
   if (!targetField || targetField.deletedAt) {
@@ -120,7 +128,12 @@ export async function PATCH(
     const referencedIds = extractFormulaFieldIds(formula);
     if (referencedIds.length > 0) {
       const refFields = await prisma.customField.findMany({
-        where: { id: { in: referencedIds }, objectType: targetField.objectType, deletedAt: null },
+        where: {
+          id: { in: referencedIds },
+          objectType: targetField.objectType,
+          deletedAt: null,
+          ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        },
         select: { id: true, type: true },
       });
       const invalid = referencedIds.filter(
@@ -143,6 +156,15 @@ export async function PATCH(
     },
   });
 
+  await logAudit({
+    actorId: user.id,
+    entityType: "CUSTOM_FIELD",
+    entityId: field.id,
+    action: "UPDATE",
+    before: { type: targetField.type, masked: targetField.masked },
+    after: { label: field.label, type: field.type, masked: field.masked },
+  });
+
   return jsonOk({ field });
 }
 
@@ -152,13 +174,19 @@ export async function DELETE(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "manage")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { fieldId: fieldIdParam } = await params;
   const fieldId = parseId(fieldIdParam);
   if (!fieldId) return jsonError("필드 정보가 올바르지 않습니다.");
 
-  const field = await prisma.customField.findUnique({
-    where: { id: fieldId },
+  const field = await prisma.customField.findFirst({
+    where: {
+      id: fieldId,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
     select: { id: true, objectType: true, deletedAt: true },
   });
   if (!field || field.deletedAt) {
@@ -170,8 +198,20 @@ export async function DELETE(
     data: { deletedAt: new Date() },
   });
 
+  await logAudit({
+    actorId: user.id,
+    entityType: "CUSTOM_FIELD",
+    entityId: fieldId,
+    action: "DELETE",
+    before: { id: fieldId, objectType: field.objectType },
+  });
+
   const remaining = await prisma.customField.findMany({
-    where: { objectType: field.objectType, deletedAt: null },
+    where: {
+      objectType: field.objectType,
+      deletedAt: null,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
     orderBy: { position: "asc" },
     select: { id: true },
   });

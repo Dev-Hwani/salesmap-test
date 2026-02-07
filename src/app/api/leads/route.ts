@@ -2,11 +2,13 @@
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
-import { canAssignOwner, getAssignableUsers, getVisibleOwnerIds } from "@/lib/policy";
+import { canAssignOwner, getAssignableUsers, getVisibleOwnerIds, hasPermission } from "@/lib/policy";
 import { parseRequestWithFiles } from "@/lib/request";
 import { parseCustomFieldInputs } from "@/lib/customFieldInput";
 import { evaluateFormula } from "@/lib/calculation";
 import { saveUploadedFile } from "@/lib/fileStorage";
+import { logAudit } from "@/lib/audit";
+import { filterMasked, getMaskedFieldIds } from "@/lib/masking";
 import { z } from "zod";
 
 const leadSchema = z.object({
@@ -75,22 +77,35 @@ export async function GET() {
         },
       },
       files: {
+        where: { isCurrent: true },
         select: {
           id: true,
           fieldId: true,
           originalName: true,
           mimeType: true,
           size: true,
+          version: true,
+          isCurrent: true,
+          groupKey: true,
+          replacedAt: true,
           createdAt: true,
         },
       },
     },
   });
 
+  const maskedIds = await getMaskedFieldIds("LEAD", user.workspaceId);
   return jsonOk({
     leads: leads.map((lead) => {
       const { _count, ...rest } = lead;
-      return { ...rest, dealCount: _count.deals };
+      return {
+        ...rest,
+        dealCount: _count.deals,
+        fieldValues: filterMasked(rest.fieldValues, maskedIds),
+        optionValues: filterMasked(rest.optionValues, maskedIds),
+        userValues: filterMasked(rest.userValues, maskedIds),
+        files: filterMasked(rest.files, maskedIds),
+      };
     }),
   });
 }
@@ -98,6 +113,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "write")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { body, filesByFieldId } = await parseRequestWithFiles<z.infer<typeof leadSchema>>(
     request
@@ -135,7 +153,12 @@ export async function POST(request: NextRequest) {
   const fieldIds = inputs.map((value) => value.fieldId);
   const fields = fieldIds.length
     ? await prisma.customField.findMany({
-        where: { id: { in: fieldIds }, objectType: "LEAD", deletedAt: null },
+        where: {
+          id: { in: fieldIds },
+          objectType: "LEAD",
+          deletedAt: null,
+          ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        },
       })
     : [];
 
@@ -175,13 +198,23 @@ export async function POST(request: NextRequest) {
   const hasValueMap = parsedFields.data.hasValueMap;
 
   const requiredFields = await prisma.customField.findMany({
-    where: { objectType: "LEAD", deletedAt: null, required: true },
+    where: {
+      objectType: "LEAD",
+      deletedAt: null,
+      required: true,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
   });
 
   const fileFieldIds = Array.from(filesByFieldId.keys());
   const fileFields = fileFieldIds.length
     ? await prisma.customField.findMany({
-        where: { id: { in: fileFieldIds }, objectType: "LEAD", deletedAt: null },
+        where: {
+          id: { in: fileFieldIds },
+          objectType: "LEAD",
+          deletedAt: null,
+          ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        },
       })
     : [];
 
@@ -205,7 +238,12 @@ export async function POST(request: NextRequest) {
   });
 
   const calculationFields = await prisma.customField.findMany({
-    where: { objectType: "LEAD", deletedAt: null, type: "calculation" },
+    where: {
+      objectType: "LEAD",
+      deletedAt: null,
+      type: "calculation",
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
   });
 
   const warnings: string[] = [];
@@ -306,17 +344,49 @@ export async function POST(request: NextRequest) {
         },
       },
       files: {
+        where: { isCurrent: true },
         select: {
           id: true,
           fieldId: true,
           originalName: true,
           mimeType: true,
           size: true,
+          version: true,
+          isCurrent: true,
+          groupKey: true,
+          replacedAt: true,
           createdAt: true,
         },
       },
     },
   });
 
-  return jsonOk({ lead, warnings }, 201);
+  await logAudit({
+    actorId: user.id,
+    entityType: "LEAD",
+    entityId: lead.id,
+    action: "CREATE",
+    after: { name: lead.name, ownerId: lead.ownerId, status: lead.status },
+  });
+
+  if (fileCreates.length > 0) {
+    await logAudit({
+      actorId: user.id,
+      entityType: "FILE",
+      entityId: null,
+      action: "FILE_UPLOAD",
+      meta: { objectType: "LEAD", objectId: lead.id, count: fileCreates.length },
+    });
+  }
+
+  const maskedIds = await getMaskedFieldIds("LEAD", user.workspaceId);
+  const sanitized = {
+    ...lead,
+    fieldValues: filterMasked(lead.fieldValues, maskedIds),
+    optionValues: filterMasked(lead.optionValues, maskedIds),
+    userValues: filterMasked(lead.userValues, maskedIds),
+    files: filterMasked(lead.files, maskedIds),
+  };
+
+  return jsonOk({ lead: sanitized, warnings }, 201);
 }

@@ -3,7 +3,9 @@ import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
 import { parseId } from "@/lib/ids";
-import { canAssignOwner, getVisibleOwnerIds } from "@/lib/policy";
+import { canAssignOwner, getVisibleOwnerIds, hasPermission } from "@/lib/policy";
+import { logAudit } from "@/lib/audit";
+import { filterMasked, getMaskedFieldIds } from "@/lib/masking";
 import { z } from "zod";
 
 const updateSchema = z.object({
@@ -22,6 +24,9 @@ export async function PATCH(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "write")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { dealId: dealIdParam } = await params;
   const dealId = parseId(dealIdParam);
@@ -33,9 +38,12 @@ export async function PATCH(
     return jsonError("수정 요청이 올바르지 않습니다.");
   }
 
-  const deal = await prisma.deal.findUnique({
-    where: { id: dealId },
-    select: { id: true, pipelineId: true, ownerId: true },
+  const deal = await prisma.deal.findFirst({
+    where: {
+      id: dealId,
+      ...(user.workspaceId ? { pipeline: { workspaceId: user.workspaceId } } : {}),
+    },
+    select: { id: true, pipelineId: true, ownerId: true, stageId: true, name: true },
   });
   if (!deal) return jsonError("딜을 찾을 수 없습니다.", 404);
 
@@ -134,5 +142,30 @@ export async function PATCH(
     },
   });
 
-  return jsonOk({ deal: updated });
+  if (deal.stageId !== updated.stageId) {
+    await logAudit({
+      actorId: user.id,
+      entityType: "DEAL",
+      entityId: updated.id,
+      action: "STAGE_MOVE",
+      meta: { fromStageId: deal.stageId, toStageId: updated.stageId },
+    });
+  } else {
+    await logAudit({
+      actorId: user.id,
+      entityType: "DEAL",
+      entityId: updated.id,
+      action: "UPDATE",
+      before: { name: deal.name, ownerId: deal.ownerId },
+      after: { name: updated.name, ownerId: updated.ownerId },
+    });
+  }
+
+  const maskedIds = await getMaskedFieldIds("DEAL", user.workspaceId);
+  const sanitized = {
+    ...updated,
+    fieldValues: filterMasked(updated.fieldValues, maskedIds),
+  };
+
+  return jsonOk({ deal: sanitized });
 }

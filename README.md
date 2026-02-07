@@ -7,12 +7,15 @@
 ## 핵심 구현 요약
 
 - 인증: JWT + HttpOnly 쿠키, 만료 7일, 기본 해시 처리
-- 권한: A/B/C 계층, 상위 → 하위 조회 가능
-- 파이프라인: 멀티 파이프라인, 스테이지 CRUD + 순서 변경
+- 권한: A/B/C 계층 + 역할 권한(read/write/delete/manage)
+- 워크스페이스/팀: 기본 워크스페이스 생성, 팀 관리/배정, 팀 단위 가시성
+- 파이프라인: 멀티 파이프라인, 스테이지 CRUD + 순서 변경/삽입
 - 딜: 칸반 UI + Drag & Drop(dnd-kit)
-- 오브젝트: 딜/리드/고객/회사 확장, 최소 CRUD 제공
-- 커스텀 필드: text/number/date/datetime, 필수/마스킹/노출 옵션 지원
-- 필터: AND 조건, is / is not, 기본/커스텀 필드 모두 지원
+- 오브젝트: 딜/리드/고객/회사 최소 CRUD 제공
+- 커스텀 필드: text/number/date/datetime/single_select/multi_select/boolean/user/users/file/calculation
+- 파일: 업로드/삭제/교체, 버전 관리, 미리보기
+- 필터: AND/OR + is/is not/contains/not_contains/gt/gte/lt/lte/between/before/after
+- 히스토리: 주요 이벤트 활동 로그 기록/조회
 
 ## 기술/구조 선택 이유
 
@@ -55,10 +58,14 @@
 
 ## 비즈니스 정책 요약
 
-- 권한 정책: A는 A/B/C, B는 B/C, C는 본인 딜만 조회
+- 권한 정책: A는 A/B/C, B는 B/C, C는 본인만 조회
+- 역할 권한: read/write/delete/manage로 API 접근 제어
+- 워크스페이스/팀 범위: workspaceId + teamId 기준으로 조회 범위 제한
 - 스테이지 정책: 딜이 존재하면 삭제 불가, 최소 3개 유지
 - 파이프라인 정책: 딜이 존재하면 삭제 불가, 최소 1개 유지
-- 필터 정책: AND + is/is not으로 예측 가능하고 단순한 규칙 유지
+- 마스킹 정책: UI 숨김 + 서버 응답/검색/파일 접근 차단
+- 파일 정책: 교체 시 버전 증가, 현재 버전만 기본 노출
+- 필터 정책: AND/OR + 범위/부분 일치 연산자 지원
 - 커스텀 필드 삭제: soft delete로 값 보존
 
 ## 정책 적용 위치 (API 매핑)
@@ -66,10 +73,15 @@
 | 정책 | 적용 위치 |
 | --- | --- |
 | 권한 조회 범위(A/B/C) | `src/lib/policy.ts`, `src/app/api/deals/route.ts` |
+| 역할 권한(read/write/delete/manage) | `src/lib/policy.ts`, 각 API 라우트 |
+| 워크스페이스/팀 범위 제한 | `src/lib/policy.ts`, 각 API 라우트 |
 | 스테이지 삭제 조건(딜 존재/최소 3개) | `src/app/api/stages/[stageId]/route.ts` |
 | 파이프라인 삭제 조건(딜 존재/최소 1개) | `src/app/api/pipelines/[pipelineId]/route.ts` |
 | 커스텀 필드 타입 변경 제한 | `src/app/api/custom-fields/[fieldId]/route.ts` |
 | 딜 이동 시 스테이지 검증 | `src/app/api/deals/[dealId]/route.ts` |
+| 마스킹 강제(응답/다운로드 차단) | `src/lib/masking.ts`, `src/app/api/files/...` |
+| 파일 버전/교체 | `src/app/api/files/[objectType]/[fileId]/replace/route.ts` |
+| 활동 로그 기록 | `src/lib/audit.ts`, 각 API 라우트 |
 
 ## 주요 폴더 구조
 
@@ -95,6 +107,13 @@
 - B: B/C 딜 조회 가능
 - C: 본인 딜만 조회 가능
 - B는 A를 매니저로, C는 B를 매니저로 선택
+- 역할 권한: read/write/delete/manage로 API 접근 제어
+
+### 워크스페이스/팀
+
+- 첫 가입 시 기본 워크스페이스 생성
+- 팀 생성/수정/삭제, 사용자 팀 배정 제공
+- 워크스페이스/팀 기준으로 조회 범위 제한
 
 ### 파이프라인/스테이지
 
@@ -117,15 +136,28 @@
 
 ### 커스텀 필드
 
-- 타입: text, number, date, datetime
-- 필수/데이터 마스킹/노출 옵션 지원
+- 타입: text, number, date, datetime, single_select, multi_select, boolean, user, users, file, calculation
+- 필수/마스킹/노출 옵션 지원
 - `visible_in_create`, `visible_in_pipeline`로 화면 노출 분리
-- 필드 관리 페이지에서 생성/수정 가능
-- 마스킹 필드는 검색/필터에서 제외
+- 계산식 필드: 숫자 필드 참조(`{{필드ID}}`) + UI 삽입 버튼 제공
+- 마스킹 필드: 화면 숨김 + 서버 응답/검색/다운로드 차단
+
+### 파일 관리
+
+- 파일 업로드/삭제/교체 지원
+- 버전 관리: `groupKey`, `version`, `isCurrent`
+- 미리보기: 이미지/pdf `?inline=1`
+- 교체 시 이전 버전 보존
+
+### 활동 로그
+
+- 생성/수정/삭제, 스테이지 이동, 파일 업로드/교체 기록
+- `/settings/audit`에서 조회 가능
 
 ### 필터링
 
-- AND 조건, is / is not 연산 지원
+- AND/OR 조건 지원
+- 연산자: is/is not/contains/not_contains/gt/gte/lt/lte/between/before/after
 - 기본 필드 + 커스텀 필드 모두 적용
 - 텍스트는 대소문자 구분 없이 비교
 
@@ -166,6 +198,8 @@ pnpm dev
 - `/companies`: 회사
 - `/settings/pipelines`: 파이프라인/스테이지 설정
 - `/settings/fields`: 커스텀 필드 설정
+- `/settings/teams`: 팀 관리
+- `/settings/audit`: 활동 로그
 
 ## 기술 스택
 

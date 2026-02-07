@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
 import { parseId } from "@/lib/ids";
+import { hasPermission } from "@/lib/policy";
 import { z } from "zod";
 
 const updateSchema = z.object({
@@ -15,6 +16,9 @@ export async function PATCH(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "manage")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { optionId: optionIdParam } = await params;
   const optionId = parseId(optionIdParam);
@@ -26,8 +30,11 @@ export async function PATCH(
     return jsonError("옵션 정보를 확인해주세요.");
   }
 
-  const option = await prisma.customFieldOption.findUnique({
-    where: { id: optionId },
+  const option = await prisma.customFieldOption.findFirst({
+    where: {
+      id: optionId,
+      ...(user.workspaceId ? { field: { workspaceId: user.workspaceId } } : {}),
+    },
     select: { id: true, fieldId: true, deletedAt: true },
   });
   if (!option || option.deletedAt) {
@@ -57,13 +64,19 @@ export async function DELETE(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "manage")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { optionId: optionIdParam } = await params;
   const optionId = parseId(optionIdParam);
   if (!optionId) return jsonError("옵션 정보가 올바르지 않습니다.");
 
-  const option = await prisma.customFieldOption.findUnique({
-    where: { id: optionId },
+  const option = await prisma.customFieldOption.findFirst({
+    where: {
+      id: optionId,
+      ...(user.workspaceId ? { field: { workspaceId: user.workspaceId } } : {}),
+    },
     select: { id: true, fieldId: true, deletedAt: true },
   });
   if (!option || option.deletedAt) {

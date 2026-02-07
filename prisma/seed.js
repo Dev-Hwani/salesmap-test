@@ -8,10 +8,15 @@ async function main() {
     return;
   }
 
+  const workspace = await prisma.workspace.create({
+    data: { name: "기본 워크스페이스" },
+  });
+
   await prisma.pipeline.create({
     data: {
       name: "세일즈 파이프라인",
       position: 0,
+      workspaceId: workspace.id,
       stages: {
         create: [
           {

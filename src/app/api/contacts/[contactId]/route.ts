@@ -3,12 +3,14 @@ import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
 import { parseId } from "@/lib/ids";
-import { canAssignOwner, getAssignableUsers, getVisibleOwnerIds } from "@/lib/policy";
+import { canAssignOwner, getAssignableUsers, getVisibleOwnerIds, hasPermission } from "@/lib/policy";
 import { parseRequestWithFiles } from "@/lib/request";
 import { parseCustomFieldInputs } from "@/lib/customFieldInput";
 import { evaluateFormula } from "@/lib/calculation";
 import { saveUploadedFile } from "@/lib/fileStorage";
 import { hasStoredValue } from "@/lib/customFieldValues";
+import { logAudit } from "@/lib/audit";
+import { filterMasked, getMaskedFieldIds } from "@/lib/masking";
 import { z } from "zod";
 
 const updateSchema = z.object({
@@ -39,6 +41,9 @@ export async function PATCH(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "write")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { contactId: contactIdParam } = await params;
   const contactId = parseId(contactIdParam);
@@ -92,7 +97,12 @@ export async function PATCH(
   const fieldIds = inputs.map((value) => value.fieldId);
   const fields = fieldIds.length
     ? await prisma.customField.findMany({
-        where: { id: { in: fieldIds }, objectType: "CONTACT", deletedAt: null },
+        where: {
+          id: { in: fieldIds },
+          objectType: "CONTACT",
+          deletedAt: null,
+          ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        },
       })
     : [];
 
@@ -176,7 +186,12 @@ export async function PATCH(
   const fileFieldIds = Array.from(filesByFieldId.keys());
   const fileFields = fileFieldIds.length
     ? await prisma.customField.findMany({
-        where: { id: { in: fileFieldIds }, objectType: "CONTACT", deletedAt: null },
+        where: {
+          id: { in: fileFieldIds },
+          objectType: "CONTACT",
+          deletedAt: null,
+          ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        },
       })
     : [];
 
@@ -188,7 +203,12 @@ export async function PATCH(
   }
 
   const numberFields = await prisma.customField.findMany({
-    where: { objectType: "CONTACT", deletedAt: null, type: "number" },
+    where: {
+      objectType: "CONTACT",
+      deletedAt: null,
+      type: "number",
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
   });
 
   const numberValueMap: Record<number, number | null> = {};
@@ -205,7 +225,12 @@ export async function PATCH(
   });
 
   const calculationFields = await prisma.customField.findMany({
-    where: { objectType: "CONTACT", deletedAt: null, type: "calculation" },
+    where: {
+      objectType: "CONTACT",
+      deletedAt: null,
+      type: "calculation",
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
   });
   const warnings: string[] = [];
   const calculationRows: Array<Record<string, unknown>> = [];
@@ -221,7 +246,12 @@ export async function PATCH(
   }
 
   const requiredFields = await prisma.customField.findMany({
-    where: { objectType: "CONTACT", deletedAt: null, required: true },
+    where: {
+      objectType: "CONTACT",
+      deletedAt: null,
+      required: true,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
   });
 
   const missingRequired = requiredFields.filter((field) => {
@@ -361,12 +391,17 @@ export async function PATCH(
           },
         },
         files: {
+          where: { isCurrent: true },
           select: {
             id: true,
             fieldId: true,
             originalName: true,
             mimeType: true,
             size: true,
+            version: true,
+            isCurrent: true,
+            groupKey: true,
+            replacedAt: true,
             createdAt: true,
           },
         },
@@ -377,7 +412,35 @@ export async function PATCH(
   const results = await prisma.$transaction(operations);
   const updated = results[results.length - 1];
 
-  return jsonOk({ contact: updated, warnings });
+  await logAudit({
+    actorId: user.id,
+    entityType: "CONTACT",
+    entityId: updated.id,
+    action: "UPDATE",
+    before: { name: contact.name, ownerId: contact.ownerId },
+    after: { name: updated.name, ownerId: updated.ownerId },
+  });
+
+  if (fileCreates.length > 0) {
+    await logAudit({
+      actorId: user.id,
+      entityType: "FILE",
+      entityId: null,
+      action: "FILE_UPLOAD",
+      meta: { objectType: "CONTACT", objectId: updated.id, count: fileCreates.length },
+    });
+  }
+
+  const maskedIds = await getMaskedFieldIds("CONTACT", user.workspaceId);
+  const sanitized = {
+    ...updated,
+    fieldValues: filterMasked(updated.fieldValues, maskedIds),
+    optionValues: filterMasked(updated.optionValues, maskedIds),
+    userValues: filterMasked(updated.userValues, maskedIds),
+    files: filterMasked(updated.files, maskedIds),
+  };
+
+  return jsonOk({ contact: sanitized, warnings });
 }
 
 export async function DELETE(
@@ -386,6 +449,9 @@ export async function DELETE(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "delete")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { contactId: contactIdParam } = await params;
   const contactId = parseId(contactIdParam);
@@ -407,6 +473,14 @@ export async function DELETE(
   await prisma.contact.update({
     where: { id: contactId },
     data: { deletedAt: new Date() },
+  });
+
+  await logAudit({
+    actorId: user.id,
+    entityType: "CONTACT",
+    entityId: contactId,
+    action: "DELETE",
+    before: { name: contact.name, ownerId: contact.ownerId },
   });
 
   return jsonOk({ ok: true });

@@ -4,8 +4,12 @@ import { getManagersForRole } from "@/lib/policy";
 
 export async function GET() {
   const userCount = await prisma.user.count();
-  const managersForB = await getManagersForRole("B");
-  const managersForC = await getManagersForRole("C");
+  const workspace = await prisma.workspace.findFirst({
+    select: { id: true },
+  });
+  const workspaceId = workspace?.id ?? null;
+  const managersForB = await getManagersForRole("B", workspaceId);
+  const managersForC = await getManagersForRole("C", workspaceId);
 
   return jsonOk({
     hasUsers: userCount > 0,

@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
 import { parseId } from "@/lib/ids";
+import { hasPermission } from "@/lib/policy";
+import { logAudit } from "@/lib/audit";
 import { z } from "zod";
 
 const updateSchema = z.object({
@@ -18,6 +20,9 @@ export async function PATCH(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "manage")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { stageId: stageIdParam } = await params;
   const stageId = parseId(stageIdParam);
@@ -29,12 +34,29 @@ export async function PATCH(
     return jsonError("수정 요청이 올바르지 않습니다.");
   }
 
-  const stage = await prisma.stage.update({
+  const stage = await prisma.stage.findFirst({
+    where: {
+      id: stageId,
+      ...(user.workspaceId ? { pipeline: { workspaceId: user.workspaceId } } : {}),
+    },
+  });
+  if (!stage) return jsonError("스테이지를 찾을 수 없습니다.", 404);
+
+  const updated = await prisma.stage.update({
     where: { id: stageId },
     data: parsed.data,
   });
 
-  return jsonOk({ stage });
+  await logAudit({
+    actorId: user.id,
+    entityType: "STAGE",
+    entityId: updated.id,
+    action: "UPDATE",
+    before: { name: stage.name, position: stage.position },
+    after: { name: updated.name, position: updated.position },
+  });
+
+  return jsonOk({ stage: updated });
 }
 
 export async function DELETE(
@@ -43,13 +65,19 @@ export async function DELETE(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "manage")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { stageId: stageIdParam } = await params;
   const stageId = parseId(stageIdParam);
   if (!stageId) return jsonError("스테이지 정보가 올바르지 않습니다.");
 
-  const stage = await prisma.stage.findUnique({
-    where: { id: stageId },
+  const stage = await prisma.stage.findFirst({
+    where: {
+      id: stageId,
+      ...(user.workspaceId ? { pipeline: { workspaceId: user.workspaceId } } : {}),
+    },
     select: { id: true, pipelineId: true },
   });
 
@@ -68,6 +96,14 @@ export async function DELETE(
   }
 
   await prisma.stage.delete({ where: { id: stageId } });
+
+  await logAudit({
+    actorId: user.id,
+    entityType: "STAGE",
+    entityId: stageId,
+    action: "DELETE",
+    before: { id: stageId, pipelineId: stage.pipelineId },
+  });
 
   const remaining = await prisma.stage.findMany({
     where: { pipelineId: stage.pipelineId },

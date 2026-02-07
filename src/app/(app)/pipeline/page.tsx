@@ -9,6 +9,7 @@ import {
   FieldOption,
   FilterBar,
   FilterCondition,
+  FilterMode,
 } from "@/components/pipeline/FilterBar";
 import { DealForm } from "@/components/pipeline/DealForm";
 
@@ -94,7 +95,59 @@ function matchesFilter(
   filter: FilterCondition,
   fields: CustomField[]
 ) {
-  if (!filter.value) return true;
+  const operator = filter.operator;
+  if (!filter.value && operator !== "between") return true;
+  if (operator === "between" && (!filter.value || !filter.valueTo)) return true;
+
+  const compareText = (dealValue: string) => {
+    const normalizedDeal = normalizeText(dealValue);
+    const normalizedFilter = normalizeText(filter.value);
+    if (operator === "contains") return normalizedDeal.includes(normalizedFilter);
+    if (operator === "not_contains") return !normalizedDeal.includes(normalizedFilter);
+    if (operator === "is") return normalizedDeal === normalizedFilter;
+    if (operator === "is_not") return normalizedDeal !== normalizedFilter;
+    return true;
+  };
+
+  const compareNumber = (value: number | null) => {
+    const target = Number(filter.value);
+    if (Number.isNaN(target) || value === null || Number.isNaN(value)) return true;
+    if (operator === "is") return value === target;
+    if (operator === "is_not") return value !== target;
+    if (operator === "gt") return value > target;
+    if (operator === "gte") return value >= target;
+    if (operator === "lt") return value < target;
+    if (operator === "lte") return value <= target;
+    if (operator === "between") {
+      const end = Number(filter.valueTo ?? "");
+      if (Number.isNaN(end)) return true;
+      const min = Math.min(target, end);
+      const max = Math.max(target, end);
+      return value >= min && value <= max;
+    }
+    return true;
+  };
+
+  const compareDate = (value: string) => {
+    if (!value) return false;
+    if (operator === "is") return value === filter.value;
+    if (operator === "is_not") return value !== filter.value;
+    const start = new Date(filter.value);
+    if (Number.isNaN(start.getTime())) return true;
+    const dealDate = new Date(value);
+    if (Number.isNaN(dealDate.getTime())) return true;
+    if (operator === "before") return dealDate < start;
+    if (operator === "after") return dealDate > start;
+    if (operator === "between") {
+      const endValue = filter.valueTo ?? "";
+      const end = new Date(endValue);
+      if (Number.isNaN(end.getTime())) return true;
+      const min = start < end ? start : end;
+      const max = start > end ? start : end;
+      return dealDate >= min && dealDate <= max;
+    }
+    return true;
+  };
 
   if (filter.fieldKey.startsWith("custom-")) {
     const id = Number(filter.fieldKey.replace("custom-", ""));
@@ -102,53 +155,37 @@ function matchesFilter(
     if (!field) return true;
 
     if (field.type === "text") {
-      const dealValue = normalizeText(String(getCustomFieldValue(deal, field) ?? ""));
-      const filterValue = normalizeText(filter.value);
-      return filter.operator === "is"
-        ? dealValue === filterValue
-        : dealValue !== filterValue;
+      return compareText(String(getCustomFieldValue(deal, field) ?? ""));
     }
 
     if (field.type === "number" || field.type === "calculation") {
-      const numeric = Number(filter.value);
-      if (Number.isNaN(numeric)) return true;
       const dealValue = Number(getCustomFieldValue(deal, field) ?? NaN);
-      return filter.operator === "is"
-        ? dealValue === numeric
-        : dealValue !== numeric;
+      return compareNumber(Number.isNaN(dealValue) ? null : dealValue);
     }
 
     if (field.type === "date") {
       const dealValue = String(getCustomFieldValue(deal, field) ?? "");
-      return filter.operator === "is"
-        ? dealValue === filter.value
-        : dealValue !== filter.value;
+      return compareDate(dealValue);
     }
 
     if (field.type === "datetime") {
       const dealValue = String(getCustomFieldValue(deal, field) ?? "");
-      return filter.operator === "is"
-        ? dealValue === filter.value
-        : dealValue !== filter.value;
+      return compareDate(dealValue);
     }
 
     if (field.type === "boolean") {
       const match = deal.fieldValues.find((value) => value.fieldId === field.id);
       if (match?.valueBoolean === null || match?.valueBoolean === undefined) {
-        return filter.operator === "is_not";
+        return operator === "is_not";
       }
       const boolValue = match.valueBoolean ? "true" : "false";
-      return filter.operator === "is"
-        ? boolValue === filter.value
-        : boolValue !== filter.value;
+      return operator === "is" ? boolValue === filter.value : boolValue !== filter.value;
     }
 
     if (field.type === "single_select") {
       const match = deal.fieldValues.find((value) => value.fieldId === field.id);
       const optionId = match?.valueOptionId ? String(match.valueOptionId) : "";
-      return filter.operator === "is"
-        ? optionId === filter.value
-        : optionId !== filter.value;
+      return operator === "is" ? optionId === filter.value : optionId !== filter.value;
     }
 
     if (field.type === "multi_select") {
@@ -157,13 +194,13 @@ function matchesFilter(
         .map((value) => String(value.optionId))
         .filter(Boolean) ?? [];
       const hasValue = optionIds.includes(filter.value);
-      return filter.operator === "is" ? hasValue : !hasValue;
+      return operator === "is" ? hasValue : !hasValue;
     }
 
     if (field.type === "user") {
       const match = deal.fieldValues.find((value) => value.fieldId === field.id);
       const userId = match?.valueUserId ? String(match.valueUserId) : "";
-      return filter.operator === "is" ? userId === filter.value : userId !== filter.value;
+      return operator === "is" ? userId === filter.value : userId !== filter.value;
     }
 
     if (field.type === "users") {
@@ -172,33 +209,22 @@ function matchesFilter(
         .map((value) => String(value.userId))
         .filter(Boolean) ?? [];
       const hasValue = userIds.includes(filter.value);
-      return filter.operator === "is" ? hasValue : !hasValue;
+      return operator === "is" ? hasValue : !hasValue;
     }
   }
 
   const baseKey = filter.fieldKey as BaseFieldKey;
   if (baseKey === "name") {
-    const dealValue = normalizeText(deal.name);
-    const filterValue = normalizeText(filter.value);
-    return filter.operator === "is"
-      ? dealValue === filterValue
-      : dealValue !== filterValue;
+    return compareText(deal.name);
   }
 
   if (baseKey === "expectedRevenue") {
-    const numeric = Number(filter.value);
-    if (Number.isNaN(numeric)) return true;
-    const dealValue = deal.expectedRevenue ?? NaN;
-    return filter.operator === "is"
-      ? dealValue === numeric
-      : dealValue !== numeric;
+    return compareNumber(deal.expectedRevenue ?? null);
   }
 
   if (baseKey === "closeDate") {
     const dealValue = dateToYMD(deal.closeDate ?? null);
-    return filter.operator === "is"
-      ? dealValue === filter.value
-      : dealValue !== filter.value;
+    return compareDate(dealValue);
   }
 
   return true;
@@ -225,6 +251,7 @@ export default function PipelinePage() {
   const [fields, setFields] = useState<CustomField[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<UserSummary[]>([]);
   const [filters, setFilters] = useState<FilterCondition[]>([]);
+  const [filterMode, setFilterMode] = useState<FilterMode>("and");
   const [showDealForm, setShowDealForm] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -274,16 +301,19 @@ export default function PipelinePage() {
   }, [fields, assignableUsers]);
 
   const visibleFields = useMemo(
-    () => fields.filter((field) => field.visibleInPipeline),
+    () => fields.filter((field) => field.visibleInPipeline && !field.masked),
     [fields]
   );
 
   const filteredDeals = useMemo(() => {
     if (filters.length === 0) return deals;
-    return deals.filter((deal) =>
-      filters.every((filter) => matchesFilter(deal, filter, fields))
-    );
-  }, [deals, filters, fields]);
+    return deals.filter((deal) => {
+      const matches = filters.map((filter) => matchesFilter(deal, filter, fields));
+      return filterMode === "and"
+        ? matches.every(Boolean)
+        : matches.some(Boolean);
+    });
+  }, [deals, filters, fields, filterMode]);
 
   const stageDealsMap = useMemo(() => {
     const map = new Map<number, Deal[]>();
@@ -410,7 +440,13 @@ export default function PipelinePage() {
         </button>
       </div>
 
-      <FilterBar filters={filters} setFilters={setFilters} fields={fieldOptions} />
+      <FilterBar
+        filters={filters}
+        setFilters={setFilters}
+        fields={fieldOptions}
+        mode={filterMode}
+        setMode={setFilterMode}
+      />
 
       {selectedPipeline ? (
         <DndContext onDragEnd={handleDragEnd}>

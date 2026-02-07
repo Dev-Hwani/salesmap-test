@@ -4,8 +4,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { jsonError } from "@/lib/http";
 import { parseId } from "@/lib/ids";
 import { parseObjectType } from "@/lib/objectTypes";
-import { getVisibleOwnerIds } from "@/lib/policy";
+import { getVisibleOwnerIds, hasPermission } from "@/lib/policy";
 import { deleteStoredFile } from "@/lib/fileStorage";
+import { logAudit } from "@/lib/audit";
 import { promises as fs } from "fs";
 import path from "path";
 
@@ -43,7 +44,7 @@ function getOwnerId(objectType: string, record: any) {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ objectType: string; fileId: string }> }
 ) {
   const user = await getCurrentUser();
@@ -58,6 +59,19 @@ export async function GET(
 
   const record = await getFileRecord(objectType, fileId);
   if (!record) return jsonError("파일을 찾을 수 없습니다.", 404);
+
+  const field = await prisma.customField.findFirst({
+    where: {
+      id: record.fieldId,
+      objectType,
+      deletedAt: null,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
+    select: { masked: true },
+  });
+  if (field?.masked) {
+    return jsonError("마스킹된 필드는 접근할 수 없습니다.", 403);
+  }
 
   const ownerId = getOwnerId(objectType, record);
   const visibleOwnerIds = await getVisibleOwnerIds(user);
@@ -68,11 +82,12 @@ export async function GET(
   const absolutePath = path.join(process.cwd(), record.storagePath);
   const data = await fs.readFile(absolutePath);
   const filename = encodeURIComponent(record.originalName);
+  const inline = request.nextUrl.searchParams.get("inline") === "1";
 
   return new Response(data, {
     headers: {
       "Content-Type": record.mimeType || "application/octet-stream",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${filename}"`,
     },
   });
 }
@@ -83,6 +98,9 @@ export async function DELETE(
 ) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "delete")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { objectType: objectTypeParam, fileId: fileIdParam } = await params;
   const objectType = parseObjectType(objectTypeParam);
@@ -93,6 +111,19 @@ export async function DELETE(
 
   const record = await getFileRecord(objectType, fileId);
   if (!record) return jsonError("파일을 찾을 수 없습니다.", 404);
+
+  const field = await prisma.customField.findFirst({
+    where: {
+      id: record.fieldId,
+      objectType,
+      deletedAt: null,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
+    select: { masked: true },
+  });
+  if (field?.masked) {
+    return jsonError("마스킹된 필드는 접근할 수 없습니다.", 403);
+  }
 
   const ownerId = getOwnerId(objectType, record);
   const visibleOwnerIds = await getVisibleOwnerIds(user);
@@ -111,6 +142,14 @@ export async function DELETE(
   }
 
   await deleteStoredFile(record.storagePath);
+
+  await logAudit({
+    actorId: user.id,
+    entityType: "FILE",
+    entityId: fileId,
+    action: "FILE_DELETE",
+    meta: { objectType, fieldId: record.fieldId },
+  });
 
   return new Response(null, { status: 204 });
 }

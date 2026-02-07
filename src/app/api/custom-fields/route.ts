@@ -4,6 +4,8 @@ import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
 import { parseObjectType } from "@/lib/objectTypes";
 import { extractFormulaFieldIds, validateFormulaSyntax } from "@/lib/calculation";
+import { hasPermission } from "@/lib/policy";
+import { logAudit } from "@/lib/audit";
 import { z } from "zod";
 
 const fieldSchema = z.object({
@@ -38,7 +40,11 @@ export async function GET(request: NextRequest) {
     parseObjectType(request.nextUrl.searchParams.get("objectType")) ?? "DEAL";
 
   const fields = await prisma.customField.findMany({
-    where: { objectType, deletedAt: null },
+    where: {
+      objectType,
+      deletedAt: null,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
     orderBy: { position: "asc" },
     include: {
       options: {
@@ -54,6 +60,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "manage")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const body = await request.json().catch(() => null);
   const parsed = fieldSchema.safeParse(body);
@@ -71,7 +80,12 @@ export async function POST(request: NextRequest) {
     const referencedIds = extractFormulaFieldIds(formula ?? "");
     if (referencedIds.length > 0) {
       const refFields = await prisma.customField.findMany({
-        where: { id: { in: referencedIds }, objectType, deletedAt: null },
+        where: {
+          id: { in: referencedIds },
+          objectType,
+          deletedAt: null,
+          ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        },
         select: { id: true, type: true },
       });
       const invalid = referencedIds.filter(
@@ -96,7 +110,11 @@ export async function POST(request: NextRequest) {
   }
 
   const fieldCount = await prisma.customField.count({
-    where: { objectType, deletedAt: null },
+    where: {
+      objectType,
+      deletedAt: null,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
   });
   const field = await prisma.customField.create({
     data: {
@@ -109,6 +127,7 @@ export async function POST(request: NextRequest) {
       visibleInCreate: parsed.data.visibleInCreate ?? true,
       visibleInPipeline: parsed.data.visibleInPipeline ?? false,
       position: fieldCount,
+      workspaceId: user.workspaceId ?? null,
     },
     include: {
       options: {
@@ -116,6 +135,14 @@ export async function POST(request: NextRequest) {
         orderBy: { position: "asc" },
       },
     },
+  });
+
+  await logAudit({
+    actorId: user.id,
+    entityType: "CUSTOM_FIELD",
+    entityId: field.id,
+    action: "CREATE",
+    after: { label: field.label, objectType: field.objectType, type: field.type },
   });
 
   if ((type === "single_select" || type === "multi_select") && parsed.data.options) {

@@ -2,11 +2,13 @@
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
-import { canAssignOwner, getAssignableUsers, getVisibleOwnerIds } from "@/lib/policy";
+import { canAssignOwner, getAssignableUsers, getVisibleOwnerIds, hasPermission } from "@/lib/policy";
 import { parseRequestWithFiles } from "@/lib/request";
 import { parseCustomFieldInputs } from "@/lib/customFieldInput";
 import { evaluateFormula } from "@/lib/calculation";
 import { saveUploadedFile } from "@/lib/fileStorage";
+import { logAudit } from "@/lib/audit";
+import { filterMasked, getMaskedFieldIds } from "@/lib/masking";
 import { z } from "zod";
 
 const dealSchema = z.object({
@@ -45,6 +47,14 @@ export async function GET(request: NextRequest) {
   const pipelineId = Number(pipelineParam);
   if (Number.isNaN(pipelineId)) {
     return jsonError("파이프라인 정보가 올바르지 않습니다.");
+  }
+
+  const pipeline = await prisma.pipeline.findFirst({
+    where: { id: pipelineId, ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}) },
+    select: { id: true },
+  });
+  if (!pipeline) {
+    return jsonError("파이프라인 정보가 올바르지 않습니다.", 404);
   }
 
   const visibleOwnerIds = await getVisibleOwnerIds(user);
@@ -88,24 +98,41 @@ export async function GET(request: NextRequest) {
         },
       },
       files: {
+        where: { isCurrent: true },
         select: {
           id: true,
           fieldId: true,
           originalName: true,
           mimeType: true,
           size: true,
+          version: true,
+          isCurrent: true,
+          groupKey: true,
+          replacedAt: true,
           createdAt: true,
         },
       },
     },
   });
 
-  return jsonOk({ deals });
+  const maskedIds = await getMaskedFieldIds("DEAL", user.workspaceId);
+  const sanitized = deals.map((deal) => ({
+    ...deal,
+    fieldValues: filterMasked(deal.fieldValues, maskedIds),
+    optionValues: filterMasked(deal.optionValues, maskedIds),
+    userValues: filterMasked(deal.userValues, maskedIds),
+    files: filterMasked(deal.files, maskedIds),
+  }));
+
+  return jsonOk({ deals: sanitized });
 }
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "write")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { body, filesByFieldId } = await parseRequestWithFiles<z.infer<typeof dealSchema>>(
     request
@@ -131,6 +158,14 @@ export async function POST(request: NextRequest) {
     closeDate && closeDate !== "" ? new Date(closeDate) : null;
   if (closeDateValue && Number.isNaN(closeDateValue.getTime())) {
     return jsonError("마감일 값이 올바르지 않습니다.");
+  }
+
+  const pipeline = await prisma.pipeline.findFirst({
+    where: { id: pipelineId, ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}) },
+    select: { id: true },
+  });
+  if (!pipeline) {
+    return jsonError("파이프라인 정보가 올바르지 않습니다.");
   }
 
   const stage = await prisma.stage.findUnique({
@@ -180,7 +215,12 @@ export async function POST(request: NextRequest) {
   const fieldIds = inputs.map((value) => value.fieldId);
   const fields = fieldIds.length
     ? await prisma.customField.findMany({
-        where: { id: { in: fieldIds }, objectType: "DEAL", deletedAt: null },
+        where: {
+          id: { in: fieldIds },
+          objectType: "DEAL",
+          deletedAt: null,
+          ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        },
       })
     : [];
 
@@ -220,13 +260,23 @@ export async function POST(request: NextRequest) {
   const hasValueMap = parsedFields.data.hasValueMap;
 
   const requiredFields = await prisma.customField.findMany({
-    where: { objectType: "DEAL", deletedAt: null, required: true },
+    where: {
+      objectType: "DEAL",
+      deletedAt: null,
+      required: true,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
   });
 
   const fileFieldIds = Array.from(filesByFieldId.keys());
   const fileFields = fileFieldIds.length
     ? await prisma.customField.findMany({
-        where: { id: { in: fileFieldIds }, objectType: "DEAL", deletedAt: null },
+        where: {
+          id: { in: fileFieldIds },
+          objectType: "DEAL",
+          deletedAt: null,
+          ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        },
       })
     : [];
 
@@ -250,7 +300,12 @@ export async function POST(request: NextRequest) {
   });
 
   const calculationFields = await prisma.customField.findMany({
-    where: { objectType: "DEAL", deletedAt: null, type: "calculation" },
+    where: {
+      objectType: "DEAL",
+      deletedAt: null,
+      type: "calculation",
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
   });
 
   const warnings: string[] = [];
@@ -364,17 +419,49 @@ export async function POST(request: NextRequest) {
         },
       },
       files: {
+        where: { isCurrent: true },
         select: {
           id: true,
           fieldId: true,
           originalName: true,
           mimeType: true,
           size: true,
+          version: true,
+          isCurrent: true,
+          groupKey: true,
+          replacedAt: true,
           createdAt: true,
         },
       },
     },
   });
 
-  return jsonOk({ deal, warnings }, 201);
+  await logAudit({
+    actorId: user.id,
+    entityType: "DEAL",
+    entityId: deal.id,
+    action: "CREATE",
+    after: { name: deal.name, pipelineId: deal.pipelineId, stageId: deal.stageId },
+  });
+
+  if (fileCreates.length > 0) {
+    await logAudit({
+      actorId: user.id,
+      entityType: "FILE",
+      entityId: null,
+      action: "FILE_UPLOAD",
+      meta: { objectType: "DEAL", objectId: deal.id, count: fileCreates.length },
+    });
+  }
+
+  const maskedIds = await getMaskedFieldIds("DEAL", user.workspaceId);
+  const sanitizedDeal = {
+    ...deal,
+    fieldValues: filterMasked(deal.fieldValues, maskedIds),
+    optionValues: filterMasked(deal.optionValues, maskedIds),
+    userValues: filterMasked(deal.userValues, maskedIds),
+    files: filterMasked(deal.files, maskedIds),
+  };
+
+  return jsonOk({ deal: sanitizedDeal, warnings }, 201);
 }

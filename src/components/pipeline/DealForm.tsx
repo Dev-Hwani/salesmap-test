@@ -44,7 +44,7 @@ export function DealForm({
   const [loading, setLoading] = useState(false);
 
   const visibleFields = useMemo(
-    () => fields.filter((field) => field.visibleInCreate),
+    () => fields.filter((field) => field.visibleInCreate && !field.masked),
     [fields]
   );
 

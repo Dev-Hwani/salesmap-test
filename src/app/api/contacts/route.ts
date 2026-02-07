@@ -2,11 +2,13 @@
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
-import { canAssignOwner, getAssignableUsers, getVisibleOwnerIds } from "@/lib/policy";
+import { canAssignOwner, getAssignableUsers, getVisibleOwnerIds, hasPermission } from "@/lib/policy";
 import { parseRequestWithFiles } from "@/lib/request";
 import { parseCustomFieldInputs } from "@/lib/customFieldInput";
 import { evaluateFormula } from "@/lib/calculation";
 import { saveUploadedFile } from "@/lib/fileStorage";
+import { logAudit } from "@/lib/audit";
+import { filterMasked, getMaskedFieldIds } from "@/lib/masking";
 import { z } from "zod";
 
 const contactSchema = z.object({
@@ -73,24 +75,41 @@ export async function GET() {
         },
       },
       files: {
+        where: { isCurrent: true },
         select: {
           id: true,
           fieldId: true,
           originalName: true,
           mimeType: true,
           size: true,
+          version: true,
+          isCurrent: true,
+          groupKey: true,
+          replacedAt: true,
           createdAt: true,
         },
       },
     },
   });
 
-  return jsonOk({ contacts });
+  const maskedIds = await getMaskedFieldIds("CONTACT", user.workspaceId);
+  const sanitized = contacts.map((contact) => ({
+    ...contact,
+    fieldValues: filterMasked(contact.fieldValues, maskedIds),
+    optionValues: filterMasked(contact.optionValues, maskedIds),
+    userValues: filterMasked(contact.userValues, maskedIds),
+    files: filterMasked(contact.files, maskedIds),
+  }));
+
+  return jsonOk({ contacts: sanitized });
 }
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "write")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const { body, filesByFieldId } = await parseRequestWithFiles<
     z.infer<typeof contactSchema>
@@ -128,7 +147,12 @@ export async function POST(request: NextRequest) {
   const fieldIds = inputs.map((value) => value.fieldId);
   const fields = fieldIds.length
     ? await prisma.customField.findMany({
-        where: { id: { in: fieldIds }, objectType: "CONTACT", deletedAt: null },
+        where: {
+          id: { in: fieldIds },
+          objectType: "CONTACT",
+          deletedAt: null,
+          ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        },
       })
     : [];
 
@@ -168,13 +192,23 @@ export async function POST(request: NextRequest) {
   const hasValueMap = parsedFields.data.hasValueMap;
 
   const requiredFields = await prisma.customField.findMany({
-    where: { objectType: "CONTACT", deletedAt: null, required: true },
+    where: {
+      objectType: "CONTACT",
+      deletedAt: null,
+      required: true,
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
   });
 
   const fileFieldIds = Array.from(filesByFieldId.keys());
   const fileFields = fileFieldIds.length
     ? await prisma.customField.findMany({
-        where: { id: { in: fileFieldIds }, objectType: "CONTACT", deletedAt: null },
+        where: {
+          id: { in: fileFieldIds },
+          objectType: "CONTACT",
+          deletedAt: null,
+          ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+        },
       })
     : [];
 
@@ -198,7 +232,12 @@ export async function POST(request: NextRequest) {
   });
 
   const calculationFields = await prisma.customField.findMany({
-    where: { objectType: "CONTACT", deletedAt: null, type: "calculation" },
+    where: {
+      objectType: "CONTACT",
+      deletedAt: null,
+      type: "calculation",
+      ...(user.workspaceId ? { workspaceId: user.workspaceId } : {}),
+    },
   });
 
   const warnings: string[] = [];
@@ -298,17 +337,49 @@ export async function POST(request: NextRequest) {
         },
       },
       files: {
+        where: { isCurrent: true },
         select: {
           id: true,
           fieldId: true,
           originalName: true,
           mimeType: true,
           size: true,
+          version: true,
+          isCurrent: true,
+          groupKey: true,
+          replacedAt: true,
           createdAt: true,
         },
       },
     },
   });
 
-  return jsonOk({ contact, warnings }, 201);
+  await logAudit({
+    actorId: user.id,
+    entityType: "CONTACT",
+    entityId: contact.id,
+    action: "CREATE",
+    after: { name: contact.name, ownerId: contact.ownerId },
+  });
+
+  if (fileCreates.length > 0) {
+    await logAudit({
+      actorId: user.id,
+      entityType: "FILE",
+      entityId: null,
+      action: "FILE_UPLOAD",
+      meta: { objectType: "CONTACT", objectId: contact.id, count: fileCreates.length },
+    });
+  }
+
+  const maskedIds = await getMaskedFieldIds("CONTACT", user.workspaceId);
+  const sanitized = {
+    ...contact,
+    fieldValues: filterMasked(contact.fieldValues, maskedIds),
+    optionValues: filterMasked(contact.optionValues, maskedIds),
+    userValues: filterMasked(contact.userValues, maskedIds),
+    files: filterMasked(contact.files, maskedIds),
+  };
+
+  return jsonOk({ contact: sanitized, warnings }, 201);
 }

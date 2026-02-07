@@ -95,11 +95,11 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
   );
 
   const visibleCustomFields = useMemo(
-    () => customFields.filter((field) => field.visibleInCreate),
+    () => customFields.filter((field) => field.visibleInCreate && !field.masked),
     [customFields]
   );
   const listCustomFields = useMemo(
-    () => customFields.filter((field) => field.visibleInPipeline),
+    () => customFields.filter((field) => field.visibleInPipeline && !field.masked),
     [customFields]
   );
 
@@ -447,6 +447,36 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
     await refreshAll();
   };
 
+  const replaceFile = async (file: FieldFile, nextFile: File) => {
+    const formData = new FormData();
+    formData.append("file", nextFile);
+    const response = await fetch(`/api/files/${objectType}/${file.id}/replace`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      setError(data?.error ?? "파일 교체에 실패했습니다.");
+      return;
+    }
+    await refreshAll();
+  };
+
+  const handleReplaceInput = async (
+    file: FieldFile,
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const nextFile = event.target.files?.[0];
+    if (!nextFile) return;
+    await replaceFile(file, nextFile);
+    event.target.value = "";
+  };
+
+  const isPreviewable = (file: FieldFile) => {
+    if (!file.mimeType) return false;
+    return file.mimeType.startsWith("image/") || file.mimeType === "application/pdf";
+  };
+
   const convertLead = async () => {
     if (!convertTarget) return;
     if (!convertPipelineId || !convertStageId) {
@@ -622,6 +652,27 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
                           >
                             {file.originalName}
                           </a>
+                          {file.version ? (
+                            <span className="text-[11px] text-zinc-500">v{file.version}</span>
+                          ) : null}
+                          {isPreviewable(file) && (
+                            <a
+                              href={`/api/files/${objectType}/${file.id}?inline=1`}
+                              className="text-[11px] text-blue-600 underline"
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              미리보기
+                            </a>
+                          )}
+                          <label className="text-[11px] text-blue-600 underline">
+                            교체
+                            <input
+                              type="file"
+                              className="hidden"
+                              onChange={(event) => handleReplaceInput(file, event)}
+                            />
+                          </label>
                           <button
                             type="button"
                             onClick={() => removeFile(file)}
@@ -1024,6 +1075,29 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
                                       >
                                         {file.originalName}
                                       </a>
+                                      {file.version ? (
+                                        <span className="text-[11px] text-zinc-500">
+                                          v{file.version}
+                                        </span>
+                                      ) : null}
+                                      {isPreviewable(file) && (
+                                        <a
+                                          href={`/api/files/${objectType}/${file.id}?inline=1`}
+                                          className="text-[11px] text-blue-600 underline"
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          미리보기
+                                        </a>
+                                      )}
+                                      <label className="text-[11px] text-blue-600 underline">
+                                        교체
+                                        <input
+                                          type="file"
+                                          className="hidden"
+                                          onChange={(event) => handleReplaceInput(file, event)}
+                                        />
+                                      </label>
                                       <button
                                         type="button"
                                         onClick={() => removeFile(file)}

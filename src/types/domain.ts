@@ -95,8 +95,35 @@ export type FieldFile = {
   originalName: string;
   mimeType: string;
   size: number;
+  version?: number;
+  isCurrent?: boolean;
+  groupKey?: string;
+  replacedAt?: string | null;
   createdAt?: string;
   objectType?: ObjectType;
+};
+
+export type Team = {
+  id: number;
+  name: string;
+};
+
+export type Workspace = {
+  id: number;
+  name: string;
+};
+
+export type AuditLog = {
+  id: number;
+  actorId: number;
+  actor?: UserSummary;
+  entityType: string;
+  entityId?: number | null;
+  action: string;
+  before?: unknown;
+  after?: unknown;
+  meta?: unknown;
+  createdAt: string;
 };
 
 export type Deal = {

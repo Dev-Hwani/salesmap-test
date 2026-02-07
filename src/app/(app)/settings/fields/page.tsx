@@ -94,6 +94,15 @@ export default function FieldSettingsPage() {
 
   const listLabel = objectType === "DEAL" ? "파이프라인 표시" : "목록 표시";
   const systemFields = useMemo(() => getSystemFields(objectType), [objectType]);
+  const numericFields = useMemo(
+    () => fields.filter((field) => field.type === "number"),
+    [fields]
+  );
+
+  const appendToken = (formula: string, fieldId: number) => {
+    const token = `{{${fieldId}}}`;
+    return formula.trim().length > 0 ? `${formula} ${token}` : token;
+  };
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const refreshFields = async () => {
@@ -407,6 +416,25 @@ export default function FieldSettingsPage() {
                 className="rounded border border-zinc-300 px-3 py-2 text-sm"
               />
             </label>
+            {numericFields.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                {numericFields.map((field) => (
+                  <button
+                    key={field.id}
+                    type="button"
+                    onClick={() =>
+                      setNewField((prev) => ({
+                        ...prev,
+                        formula: appendToken(prev.formula, field.id),
+                      }))
+                    }
+                    className="rounded border border-zinc-300 px-2 py-1"
+                  >
+                    {field.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         <div className="mt-3 flex flex-wrap gap-4 text-sm">
@@ -636,6 +664,24 @@ export default function FieldSettingsPage() {
                       className="rounded border border-zinc-300 px-3 py-2 text-sm"
                     />
                   </label>
+                  {numericFields.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                      {numericFields.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() =>
+                            onFieldChange(field.id, {
+                              formula: appendToken(field.formula ?? "", item.id),
+                            })
+                          }
+                          className="rounded border border-zinc-300 px-2 py-1"
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {isSelectType(field.type) && (

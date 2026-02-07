@@ -37,6 +37,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link href="/companies">회사</Link>
             <Link href="/settings/pipelines">파이프라인 설정</Link>
             <Link href="/settings/fields">커스텀 필드</Link>
+            <Link href="/settings/teams">팀 관리</Link>
+            <Link href="/settings/audit">활동 로그</Link>
           </div>
           <div className="flex items-center gap-3 text-sm">
             <span className="text-zinc-800">

@@ -2,6 +2,8 @@
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
+import { hasPermission } from "@/lib/policy";
+import { logAudit } from "@/lib/audit";
 import { z } from "zod";
 
 const pipelineSchema = z.object({
@@ -15,6 +17,7 @@ export async function GET() {
   }
 
   const pipelines = await prisma.pipeline.findMany({
+    where: user.workspaceId ? { workspaceId: user.workspaceId } : undefined,
     orderBy: { position: "asc" },
     include: {
       stages: {
@@ -53,6 +56,9 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return jsonError("인증이 필요합니다.", 401);
   }
+  if (!hasPermission(user, "manage")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
 
   const body = await request.json().catch(() => null);
   const parsed = pipelineSchema.safeParse(body);
@@ -61,12 +67,15 @@ export async function POST(request: NextRequest) {
   }
 
   const { name } = parsed.data;
-  const pipelineCount = await prisma.pipeline.count();
+  const pipelineCount = await prisma.pipeline.count({
+    where: user.workspaceId ? { workspaceId: user.workspaceId } : undefined,
+  });
 
   const pipeline = await prisma.pipeline.create({
     data: {
       name,
       position: pipelineCount,
+      workspaceId: user.workspaceId ?? null,
       stages: {
         create: [
           {
@@ -96,6 +105,14 @@ export async function POST(request: NextRequest) {
     include: {
       stages: { orderBy: { position: "asc" } },
     },
+  });
+
+  await logAudit({
+    actorId: user.id,
+    entityType: "PIPELINE",
+    entityId: pipeline.id,
+    action: "CREATE",
+    after: { name: pipeline.name, position: pipeline.position },
   });
 
   return jsonOk(

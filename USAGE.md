@@ -81,9 +81,11 @@ pnpm dev
 
 1. 필터 조건 추가
 2. 필드 선택 (기본 + 커스텀)
-3. 연산자 선택: `is`, `is not`
-4. 값 입력
-5. 여러 조건은 AND로 결합
+3. AND/OR 선택
+4. 연산자 선택
+5. 값 입력
+
+지원 연산자: `is`, `is not`, `contains`, `not_contains`, `gt`, `gte`, `lt`, `lte`, `between`, `before`, `after`
 
 ---
 
@@ -106,6 +108,11 @@ pnpm dev
 
 - 목록 카드의 “수정” 버튼으로 값 수정
 - “삭제”는 soft delete 방식으로 처리됨
+
+### 파일
+
+- 파일 타입 커스텀 필드가 있는 경우 업로드 가능
+- 카드/수정 화면에서 다운로드, 미리보기, 교체, 삭제 가능
 
 ---
 
@@ -141,6 +148,13 @@ pnpm dev
 - number
 - date
 - datetime
+- single_select
+- multi_select
+- boolean
+- user
+- users
+- file
+- calculation
 
 ### 옵션
 
@@ -153,11 +167,31 @@ pnpm dev
 
 - 값이 있는 필드는 타입 변경 불가
 - 데이터 마스킹 옵션은 수정 불가
-- 마스킹 필드는 검색/필터에 사용되지 않음
+- 마스킹 필드는 검색/필터/다운로드에서 제외
+- calculation 필드는 숫자 필드만 참조 가능
 
 ---
 
-## 8) 권한 규칙 (A/B/C)
+## 8) 팀 관리
+
+경로: `/settings/teams`
+
+- 팀 생성/수정/삭제
+- 사용자 팀 배정
+- 팀에 사용자가 있으면 삭제 불가
+
+---
+
+## 9) 활동 로그
+
+경로: `/settings/audit`
+
+- 생성/수정/삭제/스테이지 이동/파일 변경 이력 확인
+- 최근 기록 순으로 표시
+
+---
+
+## 10) 권한 규칙 (A/B/C)
 
 - A: A/B/C 딜 조회 가능
 - B: B/C 딜 조회 가능
@@ -167,7 +201,7 @@ pnpm dev
 
 ---
 
-## 9) 주요 페이지
+## 11) 주요 페이지
 
 - `/login`: 로그인
 - `/signup`: 회원가입
@@ -177,3 +211,5 @@ pnpm dev
 - `/companies`: 회사
 - `/settings/pipelines`: 파이프라인/스테이지 설정
 - `/settings/fields`: 커스텀 필드 설정
+- `/settings/teams`: 팀 관리
+- `/settings/audit`: 활동 로그
