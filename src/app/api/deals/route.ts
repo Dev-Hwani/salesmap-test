@@ -61,6 +61,7 @@ export async function GET(request: NextRequest) {
   const deals = await prisma.deal.findMany({
     where: {
       pipelineId,
+      deletedAt: null,
       ...(visibleOwnerIds ? { ownerId: { in: visibleOwnerIds } } : {}),
     },
     orderBy: { createdAt: "desc" },

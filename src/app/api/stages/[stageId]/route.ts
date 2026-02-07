@@ -83,7 +83,9 @@ export async function DELETE(
 
   if (!stage) return jsonError("스테이지를 찾을 수 없습니다.", 404);
 
-  const dealCount = await prisma.deal.count({ where: { stageId } });
+  const dealCount = await prisma.deal.count({
+    where: { stageId, deletedAt: null },
+  });
   if (dealCount > 0) {
     return jsonError("딜이 존재하는 스테이지는 삭제할 수 없습니다.");
   }

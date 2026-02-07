@@ -22,12 +22,26 @@ export async function GET() {
     include: {
       stages: {
         orderBy: { position: "asc" },
-        include: {
-          _count: { select: { deals: true } },
-        },
       },
-      _count: { select: { deals: true, stages: true } },
     },
+  });
+
+  const pipelineIds = pipelines.map((pipeline) => pipeline.id);
+  const dealCounts = pipelineIds.length
+    ? await prisma.deal.groupBy({
+        by: ["pipelineId", "stageId"],
+        where: { pipelineId: { in: pipelineIds }, deletedAt: null },
+        _count: { _all: true },
+      })
+    : [];
+  const stageCountMap = new Map<number, number>();
+  const pipelineCountMap = new Map<number, number>();
+  dealCounts.forEach((row) => {
+    stageCountMap.set(row.stageId, row._count._all);
+    pipelineCountMap.set(
+      row.pipelineId,
+      (pipelineCountMap.get(row.pipelineId) ?? 0) + row._count._all
+    );
   });
 
   return jsonOk({
@@ -35,8 +49,8 @@ export async function GET() {
       id: pipeline.id,
       name: pipeline.name,
       position: pipeline.position,
-      dealCount: pipeline._count.deals,
-      stageCount: pipeline._count.stages,
+      dealCount: pipelineCountMap.get(pipeline.id) ?? 0,
+      stageCount: pipeline.stages.length,
       stages: pipeline.stages.map((stage) => ({
         id: stage.id,
         pipelineId: stage.pipelineId,
@@ -45,7 +59,7 @@ export async function GET() {
         description: stage.description,
         stagnationDays: stage.stagnationDays,
         position: stage.position,
-        dealCount: stage._count.deals,
+        dealCount: stageCountMap.get(stage.id) ?? 0,
       })),
     })),
   });

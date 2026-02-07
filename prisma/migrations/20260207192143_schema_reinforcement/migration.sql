@@ -29,6 +29,9 @@ ALTER TABLE `dealfieldfile` ADD COLUMN `groupKey` VARCHAR(191) NULL,
     ADD COLUMN `version` INTEGER NOT NULL DEFAULT 1;
 
 -- AlterTable
+ALTER TABLE `Deal` ADD COLUMN `deletedAt` DATETIME(3) NULL;
+
+-- AlterTable
 ALTER TABLE `leadfieldfile` ADD COLUMN `groupKey` VARCHAR(191) NULL,
     ADD COLUMN `isCurrent` BOOLEAN NOT NULL DEFAULT true,
     ADD COLUMN `replacedAt` DATETIME(3) NULL,
@@ -110,6 +113,9 @@ CREATE INDEX `CustomField_workspaceId_idx` ON `CustomField`(`workspaceId`);
 
 -- CreateIndex
 CREATE INDEX `DealFieldFile_groupKey_idx` ON `DealFieldFile`(`groupKey`);
+
+-- CreateIndex
+CREATE INDEX `Deal_deletedAt_idx` ON `Deal`(`deletedAt`);
 
 -- CreateIndex
 CREATE INDEX `DealFieldFile_isCurrent_idx` ON `DealFieldFile`(`isCurrent`);

@@ -51,7 +51,7 @@ export async function POST(
   }
 
   const existingDeal = await prisma.deal.findFirst({
-    where: { sourceLeadId: leadId },
+    where: { sourceLeadId: leadId, deletedAt: null },
     select: { id: true },
   });
   if (existingDeal) {

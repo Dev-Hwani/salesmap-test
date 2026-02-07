@@ -88,7 +88,9 @@ export async function DELETE(
     return jsonError("파이프라인을 찾을 수 없습니다.", 404);
   }
 
-  const dealCount = await prisma.deal.count({ where: { pipelineId: id } });
+  const dealCount = await prisma.deal.count({
+    where: { pipelineId: id, deletedAt: null },
+  });
   if (dealCount > 0) {
     return jsonError("딜이 존재하는 파이프라인은 삭제할 수 없습니다.");
   }

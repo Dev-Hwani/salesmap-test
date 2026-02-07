@@ -254,6 +254,7 @@ export default function PipelinePage() {
   const [filterMode, setFilterMode] = useState<FilterMode>("and");
   const [showDealForm, setShowDealForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [deletingDealId, setDeletingDealId] = useState<number | null>(null);
 
   const selectedPipeline = pipelines.find(
     (pipeline) => pipeline.id === selectedPipelineId
@@ -410,6 +411,28 @@ export default function PipelinePage() {
     }
   };
 
+  const handleDeleteDeal = async (dealId: number) => {
+    if (!selectedPipelineId) return;
+    if (deletingDealId === dealId) return;
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm("딜을 삭제할까요? 삭제된 딜은 목록에서 숨김 처리됩니다.");
+      if (!confirmed) return;
+    }
+    setDeletingDealId(dealId);
+    const response = await fetch(`/api/deals/${dealId}`, { method: "DELETE" });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      if (typeof window !== "undefined") {
+        window.alert(data?.error ?? "딜 삭제에 실패했습니다.");
+      }
+      setDeletingDealId(null);
+      return;
+    }
+    setDeals((prev) => prev.filter((deal) => deal.id !== dealId));
+    setDeletingDealId(null);
+    await refreshDeals(selectedPipelineId);
+  };
+
   if (loading) {
     return <p className="text-sm text-zinc-800">로딩 중...</p>;
   }
@@ -503,6 +526,7 @@ export default function PipelinePage() {
                         dealId={deal.id}
                         title={deal.name}
                         lines={lines}
+                        onDelete={() => handleDeleteDeal(deal.id)}
                       />
                     );
                   })}

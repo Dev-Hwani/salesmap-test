@@ -8,9 +8,11 @@ type DealCardProps = {
   dealId: number;
   title: string;
   lines: FieldLine[];
+  onEdit?: () => void;
+  onDelete?: () => void;
 };
 
-export function DealCard({ dealId, title, lines }: DealCardProps) {
+export function DealCard({ dealId, title, lines, onEdit, onDelete }: DealCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: `deal-${dealId}`,
@@ -40,6 +42,37 @@ export function DealCard({ dealId, title, lines }: DealCardProps) {
               {line.label}: {line.value}
             </div>
           ))}
+        </div>
+      )}
+      {(onEdit || onDelete) && (
+        <div
+          className="mt-3 flex items-center gap-2 text-xs"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {onEdit && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onEdit();
+              }}
+              className="rounded border border-zinc-300 px-2 py-1"
+            >
+              수정
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete();
+              }}
+              className="rounded border border-red-200 px-2 py-1 text-red-600"
+            >
+              삭제
+            </button>
+          )}
         </div>
       )}
     </div>

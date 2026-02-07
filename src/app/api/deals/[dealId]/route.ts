@@ -41,6 +41,7 @@ export async function PATCH(
   const deal = await prisma.deal.findFirst({
     where: {
       id: dealId,
+      deletedAt: null,
       ...(user.workspaceId ? { pipeline: { workspaceId: user.workspaceId } } : {}),
     },
     select: { id: true, pipelineId: true, ownerId: true, stageId: true, name: true },
@@ -168,4 +169,49 @@ export async function PATCH(
   };
 
   return jsonOk({ deal: sanitized });
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ dealId: string }> }
+) {
+  const user = await getCurrentUser();
+  if (!user) return jsonError("인증이 필요합니다.", 401);
+  if (!hasPermission(user, "delete")) {
+    return jsonError("권한이 없습니다.", 403);
+  }
+
+  const { dealId: dealIdParam } = await params;
+  const dealId = parseId(dealIdParam);
+  if (!dealId) return jsonError("딜 정보가 올바르지 않습니다.");
+
+  const deal = await prisma.deal.findFirst({
+    where: {
+      id: dealId,
+      deletedAt: null,
+      ...(user.workspaceId ? { pipeline: { workspaceId: user.workspaceId } } : {}),
+    },
+    select: { id: true, ownerId: true, name: true },
+  });
+  if (!deal) return jsonError("딜을 찾을 수 없습니다.", 404);
+
+  const visibleOwnerIds = await getVisibleOwnerIds(user);
+  if (visibleOwnerIds && !visibleOwnerIds.includes(deal.ownerId)) {
+    return jsonError("해당 딜에 접근할 수 없습니다.", 403);
+  }
+
+  await prisma.deal.update({
+    where: { id: dealId },
+    data: { deletedAt: new Date() },
+  });
+
+  await logAudit({
+    actorId: user.id,
+    entityType: "DEAL",
+    entityId: dealId,
+    action: "DELETE",
+    before: { name: deal.name, ownerId: deal.ownerId },
+  });
+
+  return jsonOk({ ok: true });
 }

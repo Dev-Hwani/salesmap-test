@@ -35,8 +35,15 @@ export async function GET(
   const stages = await prisma.stage.findMany({
     where: { pipelineId },
     orderBy: { position: "asc" },
-    include: { _count: { select: { deals: true } } },
   });
+
+  const counts = await prisma.deal.groupBy({
+    by: ["stageId"],
+    where: { pipelineId, deletedAt: null },
+    _count: { _all: true },
+  });
+  const countMap = new Map<number, number>();
+  counts.forEach((row) => countMap.set(row.stageId, row._count._all));
 
   return jsonOk({
     stages: stages.map((stage) => ({
@@ -47,7 +54,7 @@ export async function GET(
       description: stage.description,
       stagnationDays: stage.stagnationDays,
       position: stage.position,
-      dealCount: stage._count.deals,
+      dealCount: countMap.get(stage.id) ?? 0,
     })),
   });
 }
