@@ -1,9 +1,23 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { CustomField, CustomFieldOption, ObjectType } from "@/types/domain";
 import { OBJECT_TYPE_LABELS, OBJECT_TYPES } from "@/lib/objectTypes";
 import { getSystemFields } from "@/lib/systemFields";
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 type FieldDraft = CustomField;
 
@@ -35,6 +49,32 @@ function isSelectType(type: CustomField["type"]) {
   return type === "single_select" || type === "multi_select";
 }
 
+type DragHandleProps = {
+  attributes: Record<string, any>;
+  listeners: Record<string, any>;
+};
+
+type SortableFieldWrapperProps = {
+  id: number;
+  children: (props: DragHandleProps) => ReactNode;
+};
+
+function SortableFieldWrapper({ id, children }: SortableFieldWrapperProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.7 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      {children({ attributes, listeners })}
+    </div>
+  );
+}
+
 export default function FieldSettingsPage() {
   const [objectType, setObjectType] = useState<ObjectType>("DEAL");
   const [fields, setFields] = useState<FieldDraft[]>([]);
@@ -54,6 +94,7 @@ export default function FieldSettingsPage() {
 
   const listLabel = objectType === "DEAL" ? "파이프라인 표시" : "목록 표시";
   const systemFields = useMemo(() => getSystemFields(objectType), [objectType]);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const refreshFields = async () => {
     const response = await fetch(`/api/custom-fields?objectType=${objectType}`);
@@ -179,6 +220,16 @@ export default function FieldSettingsPage() {
       )
     );
     await refreshFields();
+  };
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = fields.findIndex((field) => field.id === active.id);
+    const newIndex = fields.findIndex((field) => field.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const nextFields = arrayMove(fields, oldIndex, newIndex);
+    saveFieldOrder(nextFields);
   };
 
   const moveField = (fieldId: number, direction: "up" | "down") => {
@@ -457,10 +508,28 @@ export default function FieldSettingsPage() {
 
       <section className="rounded border border-zinc-200 bg-white p-4">
         <h2 className="text-sm font-semibold">커스텀 필드 목록</h2>
+        <p className="mt-2 text-xs text-zinc-600">
+          위/아래 버튼으로 생성 화면과 목록(파이프라인) 표시 순서를 조정할 수 있습니다.
+        </p>
         <div className="mt-4 flex flex-col gap-4">
-          {fields.map((field, index) => (
-            <div key={field.id} className="rounded border border-zinc-200 p-3">
+          <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+            <SortableContext
+              items={fields.map((field) => field.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {fields.map((field, index) => (
+                <SortableFieldWrapper key={field.id} id={field.id}>
+                  {({ attributes, listeners }) => (
+                    <div className="rounded border border-zinc-200 p-3">
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  {...attributes}
+                  {...listeners}
+                  className="cursor-grab rounded border border-zinc-300 px-2 py-1 text-xs"
+                >
+                  드래그
+                </button>
                 <input
                   value={field.label}
                   onChange={(event) =>
@@ -630,8 +699,12 @@ export default function FieldSettingsPage() {
                   )}
                 </div>
               )}
-            </div>
-          ))}
+                    </div>
+                  )}
+                </SortableFieldWrapper>
+              ))}
+            </SortableContext>
+          </DndContext>
           {fields.length === 0 && (
             <p className="text-sm text-zinc-700">등록된 필드가 없습니다.</p>
           )}

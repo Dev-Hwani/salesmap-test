@@ -45,6 +45,7 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
     include: {
       owner: { select: { id: true, name: true, role: true } },
+      _count: { select: { deals: true } },
       fieldValues: {
         select: {
           fieldId: true,
@@ -86,7 +87,12 @@ export async function GET() {
     },
   });
 
-  return jsonOk({ leads });
+  return jsonOk({
+    leads: leads.map((lead) => {
+      const { _count, ...rest } = lead;
+      return { ...rest, dealCount: _count.deals };
+    }),
+  });
 }
 
 export async function POST(request: NextRequest) {

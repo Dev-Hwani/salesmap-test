@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+﻿import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
           {
             name: "제안",
             probability: 30,
-            description: "제안서를 전달하고 협의를 시작한 단계",
+            description: "제안을 전달하고 협의를 시작하는 단계",
             stagnationDays: 14,
             position: 0,
           },
@@ -98,12 +98,15 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  return jsonOk({
-    pipeline: {
-      id: pipeline.id,
-      name: pipeline.name,
-      position: pipeline.position,
-      stages: pipeline.stages,
+  return jsonOk(
+    {
+      pipeline: {
+        id: pipeline.id,
+        name: pipeline.name,
+        position: pipeline.position,
+        stages: pipeline.stages,
+      },
     },
-  }, 201);
+    201
+  );
 }

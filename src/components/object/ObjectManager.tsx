@@ -8,6 +8,7 @@ import type {
   FieldFile,
   FieldOptionValue,
   FieldUserValue,
+  Pipeline,
   ObjectType,
   UserSummary,
 } from "@/types/domain";
@@ -78,6 +79,10 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
   const [customMultiValues, setCustomMultiValues] = useState<Record<number, number[]>>({});
   const [customUserValues, setCustomUserValues] = useState<Record<number, number[]>>({});
   const [customFiles, setCustomFiles] = useState<Record<number, File[]>>({});
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [convertTarget, setConvertTarget] = useState<ObjectItem | null>(null);
+  const [convertPipelineId, setConvertPipelineId] = useState("");
+  const [convertStageId, setConvertStageId] = useState("");
 
   const systemFields = useMemo(() => getSystemFields(objectType), [objectType]);
   const createSystemFields = useMemo(
@@ -109,6 +114,11 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
     assignableUsers.forEach((user) => map.set(user.id, user));
     return map;
   }, [assignableUsers]);
+
+  const selectedConvertPipeline = useMemo(() => {
+    if (!convertPipelineId) return null;
+    return pipelines.find((pipeline) => pipeline.id === Number(convertPipelineId)) ?? null;
+  }, [pipelines, convertPipelineId]);
 
   const refreshAll = async () => {
     setLoading(true);
@@ -144,9 +154,58 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
     setLoading(false);
   };
 
+  const loadPipelines = async () => {
+    const response = await fetch("/api/pipelines");
+    if (!response.ok) return [] as Pipeline[];
+    const data = await response.json();
+    const list = data.pipelines ?? [];
+    setPipelines(list);
+    return list as Pipeline[];
+  };
+
+  const openConvert = async (item: ObjectItem) => {
+    setError(null);
+    setWarning(null);
+    setConvertTarget(item);
+    const list = pipelines.length > 0 ? pipelines : await loadPipelines();
+    const first = list[0];
+    if (first) {
+      setConvertPipelineId(String(first.id));
+      setConvertStageId(first.stages[0]?.id ? String(first.stages[0].id) : "");
+    } else {
+      setConvertPipelineId("");
+      setConvertStageId("");
+    }
+  };
+
+  const closeConvert = () => {
+    setConvertTarget(null);
+    setConvertPipelineId("");
+    setConvertStageId("");
+  };
+
   useEffect(() => {
     refreshAll().catch(() => setLoading(false));
   }, [objectType, apiPath]);
+
+  useEffect(() => {
+    if (objectType !== "LEAD") {
+      closeConvert();
+    }
+  }, [objectType]);
+
+  useEffect(() => {
+    if (!selectedConvertPipeline) return;
+    const current = Number(convertStageId);
+    const exists = selectedConvertPipeline.stages.some((stage) => stage.id === current);
+    if (!exists) {
+      setConvertStageId(
+        selectedConvertPipeline.stages[0]?.id
+          ? String(selectedConvertPipeline.stages[0].id)
+          : ""
+      );
+    }
+  }, [selectedConvertPipeline, convertStageId]);
   useEffect(() => {
     if (!showForm || editingItem) return;
     const defaults: Record<string, string> = {};
@@ -388,6 +447,29 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
     await refreshAll();
   };
 
+  const convertLead = async () => {
+    if (!convertTarget) return;
+    if (!convertPipelineId || !convertStageId) {
+      setError("파이프라인과 스테이지를 선택해주세요.");
+      return;
+    }
+    const response = await fetch(`/api/leads/${convertTarget.id}/convert`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pipelineId: Number(convertPipelineId),
+        stageId: Number(convertStageId),
+      }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      setError(data?.error ?? "딜 전환에 실패했습니다.");
+      return;
+    }
+    closeConvert();
+    await refreshAll();
+  };
+
   const renderSystemValue = (item: ObjectItem, field: SystemField) => {
     if (field.key === "ownerId") return item.owner?.name ?? "";
     if (field.key === "companyId") {
@@ -493,6 +575,16 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
                     {OBJECT_TYPE_LABELS[objectType]} #{item.id}
                   </h2>
                   <div className="flex items-center gap-2 text-sm">
+                    {objectType === "LEAD" && (
+                      <button
+                        type="button"
+                        onClick={() => openConvert(item)}
+                        disabled={Number(item.dealCount ?? 0) > 0}
+                        className="rounded border border-zinc-300 px-2 py-1 text-sm disabled:opacity-50"
+                      >
+                        {Number(item.dealCount ?? 0) > 0 ? "전환 완료" : "딜 전환"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => openEdit(item)}
@@ -1006,7 +1098,76 @@ export function ObjectManager({ objectType, apiPath }: ObjectManagerProps) {
           </div>
         </div>
       )}
+
+      {convertTarget && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 px-4">
+          <div className="w-full max-w-md rounded bg-white p-6 shadow-lg">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">딜 전환</h2>
+              <button
+                type="button"
+                onClick={closeConvert}
+                className="rounded border border-zinc-300 px-2 py-1 text-sm"
+              >
+                닫기
+              </button>
+            </div>
+            <div className="mt-4 flex flex-col gap-3 text-sm">
+              <div>
+                <span className="text-zinc-500">리드</span>
+                <div className="font-medium">{String(convertTarget.name ?? "")}</div>
+              </div>
+              <label className="flex flex-col gap-1">
+                파이프라인
+                <select
+                  value={convertPipelineId}
+                  onChange={(event) => setConvertPipelineId(event.target.value)}
+                  className="rounded border border-zinc-300 px-3 py-2"
+                >
+                  {pipelines.map((pipeline) => (
+                    <option key={pipeline.id} value={pipeline.id}>
+                      {pipeline.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                스테이지
+                <select
+                  value={convertStageId}
+                  onChange={(event) => setConvertStageId(event.target.value)}
+                  className="rounded border border-zinc-300 px-3 py-2"
+                >
+                  {selectedConvertPipeline?.stages.map((stage) => (
+                    <option key={stage.id} value={stage.id}>
+                      {stage.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={convertLead}
+                  disabled={!convertPipelineId || !convertStageId}
+                  className="rounded bg-black px-4 py-2 text-sm text-white"
+                >
+                  딜 전환
+                </button>
+                <button
+                  type="button"
+                  onClick={closeConvert}
+                  className="rounded border border-zinc-300 px-4 py-2 text-sm"
+                >
+                  취소
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 

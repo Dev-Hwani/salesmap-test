@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { CustomField, Stage, UserSummary } from "@/types/domain";
+import type { Company, Contact, CustomField, Stage, UserSummary } from "@/types/domain";
 
 type DealFormProps = {
   open: boolean;
@@ -26,6 +26,14 @@ export function DealForm({
   const [stageId, setStageId] = useState<string>("");
   const [ownerId, setOwnerId] = useState<string>("");
   const [assignableUsers, setAssignableUsers] = useState<UserSummary[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [companyMode, setCompanyMode] = useState<"existing" | "new">("existing");
+  const [contactMode, setContactMode] = useState<"existing" | "new">("existing");
+  const [companyId, setCompanyId] = useState("");
+  const [contactId, setContactId] = useState("");
+  const [newCompany, setNewCompany] = useState({ name: "", industry: "", size: "" });
+  const [newContact, setNewContact] = useState({ name: "", email: "", phone: "" });
   const [customValues, setCustomValues] = useState<Record<number, string>>({});
   const [customBoolValues, setCustomBoolValues] = useState<Record<number, boolean>>({});
   const [customMultiValues, setCustomMultiValues] = useState<Record<number, number[]>>({});
@@ -40,6 +48,12 @@ export function DealForm({
     [fields]
   );
 
+  const companyMap = useMemo(() => {
+    const map = new Map<number, string>();
+    companies.forEach((company) => map.set(company.id, company.name));
+    return map;
+  }, [companies]);
+
   useEffect(() => {
     if (!open) return;
     fetch("/api/users/assignable")
@@ -51,10 +65,40 @@ export function DealForm({
   }, [open]);
 
   useEffect(() => {
+    if (!open) return;
+    Promise.all([fetch("/api/companies"), fetch("/api/contacts")])
+      .then(async ([companiesRes, contactsRes]) => {
+        if (companiesRes.ok) {
+          const data = await companiesRes.json().catch(() => null);
+          setCompanies(data?.companies ?? []);
+        }
+        if (contactsRes.ok) {
+          const data = await contactsRes.json().catch(() => null);
+          setContacts(data?.contacts ?? []);
+        }
+      })
+      .catch(() => null);
+  }, [open]);
+
+  useEffect(() => {
     if (assignableUsers.length > 0 && !ownerId) {
       setOwnerId(String(assignableUsers[0].id));
     }
   }, [assignableUsers, ownerId]);
+
+  useEffect(() => {
+    if (!open || companyMode !== "existing") return;
+    if (companies.length > 0 && !companyId) {
+      setCompanyId(String(companies[0].id));
+    }
+  }, [open, companyMode, companies, companyId]);
+
+  useEffect(() => {
+    if (!open || contactMode !== "existing") return;
+    if (contacts.length > 0 && !contactId) {
+      setContactId(String(contacts[0].id));
+    }
+  }, [open, contactMode, contacts, contactId]);
 
   useEffect(() => {
     if (!open) return;
@@ -68,6 +112,12 @@ export function DealForm({
     setCustomMultiValues({});
     setCustomUserValues({});
     setCustomFiles({});
+    setCompanyMode("existing");
+    setContactMode("existing");
+    setCompanyId("");
+    setContactId("");
+    setNewCompany({ name: "", industry: "", size: "" });
+    setNewContact({ name: "", email: "", phone: "" });
     setError(null);
     setWarning(null);
   }, [open]);
@@ -119,11 +169,95 @@ export function DealForm({
         return { fieldId: field.id, value: customValues[field.id] ?? "" };
       });
 
+    const resolvedOwnerId = Number(ownerId || assignableUsers[0]?.id);
+    if (!resolvedOwnerId) {
+      setError("담당자 정보를 확인해주세요.");
+      setLoading(false);
+      return;
+    }
+
+    let resolvedCompanyId: number | null = null;
+    if (companyMode === "existing") {
+      resolvedCompanyId = companyId ? Number(companyId) : null;
+    } else {
+      if (!newCompany.name.trim()) {
+        setError("회사명을 입력해주세요.");
+        setLoading(false);
+        return;
+      }
+      const companyRes = await fetch("/api/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newCompany.name,
+          industry: newCompany.industry || null,
+          size: newCompany.size || null,
+          ownerId: resolvedOwnerId,
+        }),
+      });
+      if (!companyRes.ok) {
+        const data = await companyRes.json().catch(() => null);
+        setError(data?.error ?? "회사 생성에 실패했습니다.");
+        setLoading(false);
+        return;
+      }
+      const data = await companyRes.json().catch(() => null);
+      resolvedCompanyId = data?.company?.id ?? null;
+      if (!resolvedCompanyId) {
+        setError("회사 생성에 실패했습니다.");
+        setLoading(false);
+        return;
+      }
+    }
+
+    let resolvedContactId: number | null = null;
+    if (contactMode === "existing") {
+      resolvedContactId = contactId ? Number(contactId) : null;
+      if (!resolvedCompanyId && resolvedContactId) {
+        const selectedContact = contacts.find((contact) => contact.id === resolvedContactId);
+        if (selectedContact?.companyId) {
+          resolvedCompanyId = selectedContact.companyId;
+        }
+      }
+    } else {
+      if (!newContact.name.trim()) {
+        setError("고객명을 입력해주세요.");
+        setLoading(false);
+        return;
+      }
+      const contactRes = await fetch("/api/contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newContact.name,
+          email: newContact.email || null,
+          phone: newContact.phone || null,
+          companyId: resolvedCompanyId,
+          ownerId: resolvedOwnerId,
+        }),
+      });
+      if (!contactRes.ok) {
+        const data = await contactRes.json().catch(() => null);
+        setError(data?.error ?? "고객 생성에 실패했습니다.");
+        setLoading(false);
+        return;
+      }
+      const data = await contactRes.json().catch(() => null);
+      resolvedContactId = data?.contact?.id ?? null;
+      if (!resolvedContactId) {
+        setError("고객 생성에 실패했습니다.");
+        setLoading(false);
+        return;
+      }
+    }
+
     const payload = {
       name,
       pipelineId,
       stageId: Number(stageId),
-      ownerId: Number(ownerId || assignableUsers[0]?.id),
+      ownerId: resolvedOwnerId,
+      companyId: resolvedCompanyId,
+      contactId: resolvedContactId,
       expectedRevenue: expectedRevenue ? Number(expectedRevenue) : null,
       closeDate: closeDate || null,
       fieldValues: fieldPayload,
@@ -169,6 +303,12 @@ export function DealForm({
     setCustomMultiValues({});
     setCustomUserValues({});
     setCustomFiles({});
+    setCompanyMode("existing");
+    setContactMode("existing");
+    setCompanyId("");
+    setContactId("");
+    setNewCompany({ name: "", industry: "", size: "" });
+    setNewContact({ name: "", email: "", phone: "" });
     setOwnerId("");
     setStageId(stages[0]?.id ? String(stages[0].id) : "");
     setLoading(false);
@@ -250,6 +390,160 @@ export function DealForm({
                 ))}
               </select>
             </label>
+          </div>
+          <div className="rounded border border-zinc-200 p-3">
+            <p className="text-sm font-semibold">회사/고객</p>
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">회사</p>
+                <div className="flex flex-wrap gap-3 text-sm">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="company-mode"
+                      checked={companyMode === "existing"}
+                      onChange={() => setCompanyMode("existing")}
+                    />
+                    기존 선택
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="company-mode"
+                      checked={companyMode === "new"}
+                      onChange={() => setCompanyMode("new")}
+                    />
+                    신규 생성
+                  </label>
+                </div>
+                {companyMode === "existing" ? (
+                  <div className="flex flex-col gap-1">
+                    <select
+                      value={companyId}
+                      onChange={(event) => setCompanyId(event.target.value)}
+                      className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">선택 안 함</option>
+                      {companies.map((company) => (
+                        <option key={company.id} value={company.id}>
+                          {company.name}
+                        </option>
+                      ))}
+                    </select>
+                    {companies.length === 0 && (
+                      <span className="text-xs text-zinc-500">
+                        등록된 회사가 없습니다.
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2">
+                    <input
+                      value={newCompany.name}
+                      onChange={(event) =>
+                        setNewCompany((prev) => ({ ...prev, name: event.target.value }))
+                      }
+                      placeholder="회사명"
+                      className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                    />
+                    <input
+                      value={newCompany.industry}
+                      onChange={(event) =>
+                        setNewCompany((prev) => ({ ...prev, industry: event.target.value }))
+                      }
+                      placeholder="산업"
+                      className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                    />
+                    <input
+                      value={newCompany.size}
+                      onChange={(event) =>
+                        setNewCompany((prev) => ({ ...prev, size: event.target.value }))
+                      }
+                      placeholder="규모"
+                      className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">고객</p>
+                <div className="flex flex-wrap gap-3 text-sm">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="contact-mode"
+                      checked={contactMode === "existing"}
+                      onChange={() => setContactMode("existing")}
+                    />
+                    기존 선택
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="contact-mode"
+                      checked={contactMode === "new"}
+                      onChange={() => setContactMode("new")}
+                    />
+                    신규 생성
+                  </label>
+                </div>
+                {contactMode === "existing" ? (
+                  <div className="flex flex-col gap-1">
+                    <select
+                      value={contactId}
+                      onChange={(event) => setContactId(event.target.value)}
+                      className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">선택 안 함</option>
+                      {contacts.map((contact) => {
+                        const companyName = contact.companyId
+                          ? companyMap.get(contact.companyId) ?? ""
+                          : "";
+                        return (
+                          <option key={contact.id} value={contact.id}>
+                            {contact.name}
+                            {companyName ? ` (${companyName})` : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    {contacts.length === 0 && (
+                      <span className="text-xs text-zinc-500">
+                        등록된 고객이 없습니다.
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2">
+                    <input
+                      value={newContact.name}
+                      onChange={(event) =>
+                        setNewContact((prev) => ({ ...prev, name: event.target.value }))
+                      }
+                      placeholder="고객명"
+                      className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                    />
+                    <input
+                      value={newContact.email}
+                      onChange={(event) =>
+                        setNewContact((prev) => ({ ...prev, email: event.target.value }))
+                      }
+                      placeholder="이메일"
+                      className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                    />
+                    <input
+                      value={newContact.phone}
+                      onChange={(event) =>
+                        setNewContact((prev) => ({ ...prev, phone: event.target.value }))
+                      }
+                      placeholder="전화번호"
+                      className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
           {visibleFields.length > 0 && (
             <div className="rounded border border-zinc-200 p-3">

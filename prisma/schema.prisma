@@ -100,9 +100,15 @@ model Deal {
   pipelineId      Int
   stageId         Int
   ownerId         Int
+  companyId       Int?
+  contactId       Int?
+  sourceLeadId    Int?
   pipeline        Pipeline         @relation(fields: [pipelineId], references: [id], onDelete: Restrict)
   stage           Stage            @relation(fields: [stageId], references: [id], onDelete: Restrict)
   owner           User             @relation("DealOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  company         Company?         @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact         Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  sourceLead      Lead?            @relation(fields: [sourceLeadId], references: [id], onDelete: SetNull)
   fieldValues     DealFieldValue[]
   optionValues    DealFieldOptionValue[]
   userValues      DealFieldUserValue[]
@@ -113,6 +119,9 @@ model Deal {
   @@index([pipelineId])
   @@index([stageId])
   @@index([ownerId])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([sourceLeadId])
 }
 
 model CustomField {
@@ -247,6 +256,7 @@ model Lead {
   ownerId     Int
   company     Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
   owner       User       @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  deals       Deal[]
   fieldValues LeadFieldValue[]
   optionValues LeadFieldOptionValue[]
   userValues   LeadFieldUserValue[]
@@ -269,6 +279,7 @@ model Contact {
   ownerId     Int
   company     Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
   owner       User       @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  deals       Deal[]
   fieldValues ContactFieldValue[]
   optionValues ContactFieldOptionValue[]
   userValues   ContactFieldUserValue[]
@@ -289,6 +300,7 @@ model Company {
   size        String?
   ownerId     Int
   owner       User      @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  deals       Deal[]
   contacts    Contact[]
   leads       Lead[]
   fieldValues CompanyFieldValue[]

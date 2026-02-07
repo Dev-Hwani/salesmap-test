@@ -433,6 +433,12 @@ export default function PipelinePage() {
                       deal.owner?.name
                         ? { label: "담당자", value: deal.owner.name }
                         : null,
+                      deal.company?.name
+                        ? { label: "회사", value: deal.company.name }
+                        : null,
+                      deal.contact?.name
+                        ? { label: "고객", value: deal.contact.name }
+                        : null,
                       deal.expectedRevenue !== null
                         ? {
                             label: "예상 매출",

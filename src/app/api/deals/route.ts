@@ -14,6 +14,8 @@ const dealSchema = z.object({
   pipelineId: z.number().int(),
   stageId: z.number().int(),
   ownerId: z.number().int(),
+  companyId: z.number().int().nullable().optional(),
+  contactId: z.number().int().nullable().optional(),
   expectedRevenue: z.number().nullable().optional(),
   closeDate: z.string().nullable().optional(),
   fieldValues: z
@@ -54,6 +56,9 @@ export async function GET(request: NextRequest) {
     orderBy: { createdAt: "desc" },
     include: {
       owner: { select: { id: true, name: true, role: true } },
+      company: { select: { id: true, name: true } },
+      contact: { select: { id: true, name: true } },
+      sourceLead: { select: { id: true, name: true } },
       fieldValues: {
         select: {
           fieldId: true,
@@ -115,6 +120,8 @@ export async function POST(request: NextRequest) {
     pipelineId,
     stageId,
     ownerId,
+    companyId,
+    contactId,
     expectedRevenue,
     closeDate,
     fieldValues,
@@ -137,6 +144,36 @@ export async function POST(request: NextRequest) {
   const ownerAllowed = await canAssignOwner(user, ownerId);
   if (!ownerAllowed) {
     return jsonError("해당 담당자에게 딜을 할당할 수 없습니다.");
+  }
+
+  const visibleOwnerIds = await getVisibleOwnerIds(user);
+
+  if (companyId) {
+    const company = await prisma.company.findFirst({
+      where: {
+        id: companyId,
+        deletedAt: null,
+        ...(visibleOwnerIds ? { ownerId: { in: visibleOwnerIds } } : {}),
+      },
+      select: { id: true },
+    });
+    if (!company) {
+      return jsonError("회사 정보가 올바르지 않습니다.");
+    }
+  }
+
+  if (contactId) {
+    const contact = await prisma.contact.findFirst({
+      where: {
+        id: contactId,
+        deletedAt: null,
+        ...(visibleOwnerIds ? { ownerId: { in: visibleOwnerIds } } : {}),
+      },
+      select: { id: true },
+    });
+    if (!contact) {
+      return jsonError("고객 정보가 올바르지 않습니다.");
+    }
   }
 
   const inputs = fieldValues ?? [];
@@ -276,6 +313,8 @@ export async function POST(request: NextRequest) {
       pipelineId,
       stageId,
       ownerId,
+      companyId: companyId ?? null,
+      contactId: contactId ?? null,
       expectedRevenue: expectedRevenue ?? null,
       closeDate: closeDateValue,
       fieldValues: {
@@ -293,6 +332,9 @@ export async function POST(request: NextRequest) {
     },
     include: {
       owner: { select: { id: true, name: true, role: true } },
+      company: { select: { id: true, name: true } },
+      contact: { select: { id: true, name: true } },
+      sourceLead: { select: { id: true, name: true } },
       fieldValues: {
         select: {
           fieldId: true,

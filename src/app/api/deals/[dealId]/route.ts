@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+﻿import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
@@ -10,6 +10,8 @@ const updateSchema = z.object({
   name: z.string().min(1).optional(),
   stageId: z.number().int().optional(),
   ownerId: z.number().int().optional(),
+  companyId: z.number().int().nullable().optional(),
+  contactId: z.number().int().nullable().optional(),
   expectedRevenue: z.number().nullable().optional(),
   closeDate: z.string().nullable().optional(),
 });
@@ -59,6 +61,38 @@ export async function PATCH(
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(parsed.data, "companyId")) {
+    if (parsed.data.companyId) {
+      const company = await prisma.company.findFirst({
+        where: {
+          id: parsed.data.companyId,
+          deletedAt: null,
+          ...(visibleOwnerIds ? { ownerId: { in: visibleOwnerIds } } : {}),
+        },
+        select: { id: true },
+      });
+      if (!company) {
+        return jsonError("회사 정보가 올바르지 않습니다.");
+      }
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(parsed.data, "contactId")) {
+    if (parsed.data.contactId) {
+      const contact = await prisma.contact.findFirst({
+        where: {
+          id: parsed.data.contactId,
+          deletedAt: null,
+          ...(visibleOwnerIds ? { ownerId: { in: visibleOwnerIds } } : {}),
+        },
+        select: { id: true },
+      });
+      if (!contact) {
+        return jsonError("고객 정보가 올바르지 않습니다.");
+      }
+    }
+  }
+
   let closeDateValue: Date | null | undefined = undefined;
   if (Object.prototype.hasOwnProperty.call(parsed.data, "closeDate")) {
     if (parsed.data.closeDate === null || parsed.data.closeDate === "") {
@@ -80,6 +114,9 @@ export async function PATCH(
     },
     include: {
       owner: { select: { id: true, name: true, role: true } },
+      company: { select: { id: true, name: true } },
+      contact: { select: { id: true, name: true } },
+      sourceLead: { select: { id: true, name: true } },
       fieldValues: {
         select: {
           fieldId: true,

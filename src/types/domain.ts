@@ -107,7 +107,13 @@ export type Deal = {
   pipelineId: number;
   stageId: number;
   ownerId: number;
+  companyId: number | null;
+  contactId: number | null;
+  sourceLeadId: number | null;
   owner?: UserSummary;
+  company?: { id: number; name: string } | null;
+  contact?: { id: number; name: string } | null;
+  sourceLead?: { id: number; name: string } | null;
   fieldValues: FieldValue[];
   optionValues?: FieldOptionValue[];
   userValues?: FieldUserValue[];
@@ -122,6 +128,7 @@ export type Lead = {
   companyId: number | null;
   status: "NEW" | "CONTACTED" | "QUALIFIED" | "LOST";
   ownerId: number;
+  dealCount?: number;
   owner?: UserSummary;
   fieldValues: FieldValue[];
   optionValues?: FieldOptionValue[];

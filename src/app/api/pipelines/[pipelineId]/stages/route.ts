@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+﻿import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
@@ -10,6 +10,7 @@ const stageSchema = z.object({
   probability: z.number().int().min(0).max(100).nullable().optional(),
   description: z.string().nullable().optional(),
   stagnationDays: z.number().int().min(0).nullable().optional(),
+  position: z.number().int().min(0).optional(),
 });
 
 export async function GET(
@@ -61,16 +62,28 @@ export async function POST(
   }
 
   const stageCount = await prisma.stage.count({ where: { pipelineId } });
-  const stage = await prisma.stage.create({
-    data: {
-      pipelineId,
-      name: parsed.data.name,
-      probability: parsed.data.probability ?? null,
-      description: parsed.data.description ?? null,
-      stagnationDays: parsed.data.stagnationDays ?? null,
-      position: stageCount,
-    },
-  });
+  const requested = parsed.data.position;
+  const position =
+    requested === undefined
+      ? stageCount
+      : Math.min(Math.max(requested, 0), stageCount);
+
+  const [, stage] = await prisma.$transaction([
+    prisma.stage.updateMany({
+      where: { pipelineId, position: { gte: position } },
+      data: { position: { increment: 1 } },
+    }),
+    prisma.stage.create({
+      data: {
+        pipelineId,
+        name: parsed.data.name,
+        probability: parsed.data.probability ?? null,
+        description: parsed.data.description ?? null,
+        stagnationDays: parsed.data.stagnationDays ?? null,
+        position,
+      },
+    }),
+  ]);
 
   return jsonOk({ stage }, 201);
 }
