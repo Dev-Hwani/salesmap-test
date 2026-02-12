@@ -22,7 +22,10 @@ function getJwtSecret() {
 
 export function signToken(userId: number) {
   const secret = getJwtSecret();
-  const expiresIn = process.env.JWT_EXPIRES_IN || FALLBACK_EXPIRES_IN;
+  const expiresIn = parseDurationToSeconds(
+    process.env.JWT_EXPIRES_IN || FALLBACK_EXPIRES_IN,
+    FALLBACK_MAX_AGE_SECONDS
+  );
   return jwt.sign({ userId }, secret, { expiresIn });
 }
 
